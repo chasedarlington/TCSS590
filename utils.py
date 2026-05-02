@@ -46,11 +46,11 @@ def mlp(input_dim, hidden_dim, output_dim, hidden_depth, output_mod=None):
 #        """
 #        pass
 
-class PolicyGaussian(nn.Module): # select ideal policy x% of the time, otherwise explore (state ? all action dimensions at once)
+class PolicyGaussian(nn.Module): # select ideal policy x% of the time, otherwise explore (state → all action dimensions at once)
 
     def __init__(self, num_inputs, num_outputs, hidden_dim=65, hidden_depth=2): # initialize (see below)
         super(PolicyGaussian, self).__init__()
-        self.trunk = mlp(num_inputs, hidden_dim, num_outputs*2, hidden_depth) # network outputs twice the action size; (1) mean (?) (2) log standard deviation (log ?)
+        self.trunk = mlp(num_inputs, hidden_dim, num_outputs*2, hidden_depth) # network outputs twice the action size; (1) mean (μ) (2) log standard deviation (log σ)
 
     def forward(self, state):
         outs = self.trunk(state) # feed state through neural network
@@ -67,7 +67,7 @@ class PolicyGaussian(nn.Module): # select ideal policy x% of the time, otherwise
         ac_dist = torch.distributions.Independent(torch.distributions.Normal(mu, std), reinterpreted_batch_ndims=1)
         return ac_dist.log_prob(action)
 
-class PolicyAutoRegressiveModel(nn.Module): # predict a multi-dimensional action one component at a time (each later action dimension depends on the earlier sampled dimensions; state ? action_dim_0 | state + action_dim_0 ? action_dim_1 | state + action_dim_0 + action_dim_1 ? action_dim_2 | ...)
+class PolicyAutoRegressiveModel(nn.Module): # predict a multi-dimensional action one component at a time (each later action dimension depends on the earlier sampled dimensions; state → action_dim_0 | state + action_dim_0 → action_dim_1 | state + action_dim_0 + action_dim_1 → action_dim_2 | ...)
     def __init__(self, num_inputs, num_outputs, hidden_dim=65, hidden_depth=2, num_buckets=10, ac_low=-1, ac_high=1):
         super(PolicyAutoRegressiveModel, self).__init__()
         self.eps = 1e-8
