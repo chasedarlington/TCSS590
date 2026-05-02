@@ -1,9 +1,5 @@
-"""
-TODO: ONLY MODIFY TO FILL IN YOUR AUTOREGRESSIVE POLICY IMPLEMENTATION
-"""
 import torch
 import torch.nn as nn
-
 import math
 import copy
 import numpy as np
@@ -14,106 +10,116 @@ from torch import distributions as pyd
 import torch.optim as optim
 from torch.distributions import Categorical
 
+# static values w/i .utils module
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-EPS = 1e-8
+EPS = 1e-8 # epsilon! resolve log(0)
+
+# feedforward neural network: configurable multi-layer perceptron (MLP) using pyTorch
 def mlp(input_dim, hidden_dim, output_dim, hidden_depth, output_mod=None):
     if hidden_depth == 0:
-        mods = [nn.Linear(input_dim, output_dim)]
+        mods = [nn.Linear(input_dim, output_dim)] # single linear transform: *each output neuron looks at all input values, multiplies them by learned weights, adds them up, then adds a bias*
     else:
-        mods = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)]
-        for i in range(hidden_depth - 1):
+        mods = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)] # linear transform + activate (ReLU)
+        for i in range(hidden_depth - 1): # for each hidden layer: linear transform + activate (ReLU)
             mods += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU(inplace=True)]
-        mods.append(nn.Linear(hidden_dim, output_dim))
+        mods.append(nn.Linear(hidden_dim, output_dim)) # final transform
     if output_mod is not None:
-        mods.append(output_mod)
-    trunk = nn.Sequential(*mods)
-    return trunk
+        mods.append(output_mod) # optional output modifier
+    trunk = nn.Sequential(*mods) # pipe sequential layers
+    return trunk # ready-to-use neural network
 
-class PolicyBase(nn.Module):
-    def __init__(self):
-        pass
+#class PolicyBase(nn.Module):
+#    def __init__(self):
+#        pass
 
-    def forward(self, state):
-        """
-        Input: state to perform forward inference
-        Output: (action_sample from policy distribution, log_prob of sampled action)
-        """
-        pass
+#    def forward(self, state):
+#        """
+#        Input: state to perform forward inference
+#        Output: (action_sample from policy distribution, log_prob of sampled action)
+#        """
+#       pass
+#
+#    def log_prob(self, state, action):
+#        """
+#        Input: state to perform forward inference, action to evaluate log probability
+#        Output: Log probability of action distribution under the policy distribution using state
+#        """
+#        pass
 
-    def log_prob(self, state, action):
-        """
-        Input: state to perform forward inference, action to evaluate log probability
-        Output: Log probability of action distribution under the policy distribution using state
-        """
-        pass
+class PolicyGaussian(nn.Module): # select ideal policy x% of the time, otherwise explore (state ? all action dimensions at once)
 
-class PolicyGaussian(nn.Module):
-    def __init__(self, num_inputs, num_outputs, hidden_dim=65, hidden_depth=2):
+    def __init__(self, num_inputs, num_outputs, hidden_dim=65, hidden_depth=2): # initialize (see below)
         super(PolicyGaussian, self).__init__()
-        self.trunk = mlp(num_inputs, hidden_dim, num_outputs*2, hidden_depth)
+        self.trunk = mlp(num_inputs, hidden_dim, num_outputs*2, hidden_depth) # network outputs twice the action size; (1) mean (?) (2) log standard deviation (log ?)
 
     def forward(self, state):
-        outs = self.trunk(state)
-        mu, logstd = torch.split(outs, outs.shape[-1] // 2, dim=-1)
-        std = torch.exp(logstd) + EPS
-        ac_dist = torch.distributions.Independent(torch.distributions.Normal(mu, std), reinterpreted_batch_ndims=1)
-        ac = ac_dist.sample()
-        return ac, ac_dist.log_prob(ac)
+        outs = self.trunk(state) # feed state through neural network
+        mu, logstd = torch.split(outs, outs.shape[-1] // 2, dim=-1) # split self.trunk(state) into mu and log
+        std = torch.exp(logstd) + EPS # convert log stdev to [normal] stdev
+        ac_dist = torch.distributions.Independent(torch.distributions.Normal(mu, std), reinterpreted_batch_ndims=1) # one total log probability <- .Normal() creates a Gaussian per action dimension; .Independent() treats all dimensions as one joint distribution
+        ac = ac_dist.sample() # generate exploratory action!
+        return ac, ac_dist.log_prob(ac) # return explore action and log probability!
 
-    def log_prob(self, state, action):
+    def log_prob(self, state, action): # evaluate how likely a given action is!
         outs = self.trunk(state)
         mu, logstd = torch.split(outs, outs.shape[-1] // 2, dim=-1)
         std = torch.exp(logstd) + EPS
         ac_dist = torch.distributions.Independent(torch.distributions.Normal(mu, std), reinterpreted_batch_ndims=1)
         return ac_dist.log_prob(action)
 
-# TODO: FILL THIS IN
-class PolicyAutoRegressiveModel(nn.Module):
+class PolicyAutoRegressiveModel(nn.Module): # predict a multi-dimensional action one component at a time (each later action dimension depends on the earlier sampled dimensions; state ? action_dim_0 | state + action_dim_0 ? action_dim_1 | state + action_dim_0 + action_dim_1 ? action_dim_2 | ...)
     def __init__(self, num_inputs, num_outputs, hidden_dim=65, hidden_depth=2, num_buckets=10, ac_low=-1, ac_high=1):
         super(PolicyAutoRegressiveModel, self).__init__()
         self.eps = 1e-8
-        self.trunks = nn.ModuleList([mlp(num_inputs, hidden_dim, num_buckets, hidden_depth)] \
-                        + [mlp(num_inputs + j + 1, hidden_dim, num_buckets, hidden_depth) for j in range(num_outputs - 1)])
+
+        # one neural network per action dimension (i.e. discretizes each action dimension into buckets : outputs num_buckets unnormalized log-probabilities)
+        self.trunks = nn.ModuleList([mlp(num_inputs, hidden_dim, num_buckets, hidden_depth)] + [mlp(num_inputs + j + 1, hidden_dim, num_buckets, hidden_depth) for j in range(num_outputs - 1)])
+
         self.num_dims = num_outputs
         self.ac_low = torch.tensor(ac_low).to(device)
         self.ac_high = torch.tensor(ac_high).to(device)
         self.num_buckets = num_buckets
         self.bucket_size = torch.tensor((ac_high - ac_low) / num_buckets).to(device)
 
-    def discretize(self, ac):
+    def discretize(self, ac): # real-valued action -> bucket index
         bucket_idx = (ac - self.ac_low) // (self.bucket_size + self.eps)
         return torch.clip(bucket_idx, 0, self.num_buckets - 1)
 
-    def undiscretize(self, bucket_idx, dimension):
+    def undiscretize(self, bucket_idx, dimension): # bucket index -> action value (use center of bucket)
         return_val = bucket_idx[:, None]*self.bucket_size + self.ac_low + self.bucket_size*0.5
         return return_val[:, dimension]
 
-    def forward(self, state):
+    def forward(self, state): # for sampling a new action (explore)
         vals = []
-        log_probs = 0
-        for j in range(self.num_dims):
-            # TODO start: Here, we want to predict each action one dimension at a time.
-            # For each action dimension j, concatenate state with all the previous action dimensions (0...j-1), pass it through
-            # the respective MLP (i.e. self.trunks[j]) to get a logit. Use the logit to create a categorical distribution (torch.Categorical).
-            # Sample from this distribution and get that sample's log probability. Add the log probability
-            # to the running log_probs and undiscretize the sample add append it to vals.
-            # Important - use previous *sampled* actions
-            pass
-            # TODO end
+        log_prob = 0 # optional: initialize as torch.zeros(state.shape[0], device=state.device)
+        for j in range(self.num_dims): # build input to the j-th neural network; sample one dimension at a time
+          if j == 0: # first dimension only uses state
+            trunk_input = state
+          else: # subsequent dimensions use state and prior actions
+            prev_actions = torch.cat(vals, dim=-1) # map dependencies between action dimensions?
+            trunk_input = torch.cat([state, prev_actions], dim=-1)
+          logits = self.trunks[j](trunk_input) # get unnormalized log-probabilities for bucket probabilities
+          distribution = Categorical(logits=logits) # logits -> distribution
+          bucket_idx = distribution.sample() # distribution -> random sample bucket index
+          log_prob += distribution.log_prob(bucket_idx) # accummulate log probability for that bucket index
+          action_value = self.undiscretize(bucket_idx, j) # bucket index -> action value (use center of bucket) ### UNSQUEEZE?
+          vals.append(action_value[:,None]) # collect sample action values!
         vals = torch.cat(vals, dim=-1)
-        return vals, log_probs
+        return vals, log_prob
 
-    def log_prob(self, state, action):
-        log_prob = 0.
+    def log_prob(self, state, action): # for evaluating a known action: given curr state and [existing] action -> probability action on-policy?
+        vals = []
+        log_prob = 0. # optional: initialize as torch.zeros(state.shape[0], device=state.device)
         ac_discretized = self.discretize(action)
         for j in range(self.num_dims):
-            # TODO start: Here, want to get log prob of action given state under the current autoregressive model.
-            # For each action dimension j, concatenate state with all the previous action dimensions (0...j-1), pass it through
-            # the respective MLP (i.e. self.trunks[j]) to get a logit. Use the logit to create a categorical distribution.
-            # Get the log prob of the respective discretized action (i.e. ac_discretized[:, j]) and add it to the running log_prob.
-            # Important - use previous actions from the action variable, *not* sampled actions
-            pass
-            # TODO end
+          if j == 0: # first dimension only uses state
+            trunk_input = state
+          else: # subsequent dimensions use state and prior actions
+            prev_actions = action # use GIVEN action, and include dimensions according to j index
+            trunk_input = torch.cat([state, prev_actions], dim=-1)
+          logits = self.trunks[j](trunk_input) # get unnormalized log-probabilities (logits) for bucket probabilities
+          distribution = Categorical(logits=logits) # logits -> distribution
+          log_prob += distribution.log_prob(ac_discretized) # accummulate log probability for real-value bucket index
         return log_prob
 
 def rollout(
