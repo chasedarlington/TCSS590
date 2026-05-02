@@ -108,19 +108,19 @@ class PolicyAutoRegressiveModel(nn.Module): # predict a multi-dimensional action
         return vals, log_prob
 
     def log_prob(self, state, action): # for evaluating a known action: given curr state and [existing] action -> probability action on-policy?
-        vals = []
-        log_prob = 0. # optional: initialize as torch.zeros(state.shape[0], device=state.device)
-        ac_discretized = self.discretize(action)
-        for j in range(self.num_dims):
+        log_probs = [] # optional: initialize as torch.zeros(state.shape[0], device=state.device)
+        ac_discretized = self.discretize(action) # real-valued action -> bucket index (bin)
+        for j in range(self.num_dims): # for each dimension
           if j == 0: # first dimension only uses state
             trunk_input = state
           else: # subsequent dimensions use state and prior actions
-            prev_actions = action # use GIVEN action, and include dimensions according to j index
-            trunk_input = torch.cat([state, prev_actions], dim=-1)
+            prev_actions = ac_discretized[:, :j] # use GIVEN action, and include dimensions according to j index
+            trunk_input = torch.cat([state, prev_actions], dim=1)
           logits = self.trunks[j](trunk_input) # get unnormalized log-probabilities (logits) for bucket probabilities
           distribution = Categorical(logits=logits) # logits -> distribution
-          log_prob += distribution.log_prob(ac_discretized) # accummulate log probability for real-value bucket index
-        return log_prob
+          action_j = ac_discretized[:, :j].long()
+          log_probs.append(distribution.log_prob(action_j)) # accummulate log probability for real-value bucket index
+        return torch.stack(log_probs, dim=1).sum(dim=1)
 
 def rollout(
         env,
