@@ -33,19 +33,22 @@ def simulate_policy_dagger(env, policy, expert_paths, expert_policy=None, num_ep
         obs_all = torch.from_numpy(flat_obs).float().to(device)
         acs_all = torch.from_numpy(flat_ac).float().to(device)
         N = obs_all.shape[0]
-
-        idxs = np.array(range(len(trajs)))
-        num_batches = len(idxs)*episode_length // batch_size
+        # idxs = np.array(range(len(trajs))) # optional - remove
+        num_batches =  max(1, N // batch_size) # len(idxs)*episode_length // batch_size # optional - num_batches = max(1, N // batch_size)
         # Train the model with Adam
         for epoch in range(num_epochs):
             running_loss = 0.0
             for i in range(num_batches):
                 optimizer.zero_grad()
+                idx = np.random.randint(0, N, batch_size)
+                obs_batch = obs_all[idx]
+                acs_batch = acs_all[idx]
                 # TODO start: Fill in your standard behavior cloning implementation here
                 # Sample a minibatch of (obs, action) pairs from the current aggregated dataset,
                 # compute the negative log-likelihood of the actions under the policy,
                 # and assign it to `loss`.
-                loss = None
+                log_prob = policy.log_prob(obs_batch, acs_batch)
+                loss = -log_prob.mean()
                 # TODO end
                 loss.backward()
                 optimizer.step()
@@ -60,14 +63,15 @@ def simulate_policy_dagger(env, policy, expert_paths, expert_policy=None, num_ep
         # Collecting more data for dagger
         trajs_recent = []
         for k in range(num_trajs_per_dagger):
-            env.reset()
+            # env.reset() ???
+            traj = rollout(env, policy, episode_length)
+            traj = relabel_action(traj, expert_policy)
+            trajs_recent.append(traj)
             # TODO start: Rollout the policy on the environment to collect more data, relabel them,
             #             and then add them into trajs_recent
-            pass
-            # TODO end
-
         trajs += trajs_recent
         mean_return = np.mean(np.array([traj['rewards'].sum() for traj in trajs_recent]))
+        # optional - mean_return = np.mean([np.sum(traj['rewards']) for traj in trajs_recent])
         print("Average DAgger return is " + str(mean_return))
         returns.append(mean_return)
     return losses, returns
