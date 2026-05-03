@@ -1,10 +1,9 @@
 """Run BC + DAgger on Reacher + PointMaze, save loss plots and metrics."""
 import os
-import sys
 import json
 import argparse
 import numpy as np
-import torch
+import torch # --index-url https://download.pytorch.org/whl/cpu
 import gymnasium as gym
 import matplotlib
 matplotlib.use("Agg")
@@ -19,6 +18,55 @@ from reach_goal.envs.pointmaze_expert import WaypointController
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("using device", device)
+import sys
+import subprocess
+import yaml
+
+YAML_FILE = "environment.yml"
+
+with open(YAML_FILE, "r") as f:
+    env = yaml.safe_load(f)
+
+pip_packages = []
+
+for dep in env.get("dependencies", []):
+    # Handles nested pip section:
+    # - pip:
+    #     - package==version
+    if isinstance(dep, dict) and "pip" in dep:
+        pip_packages.extend(dep["pip"])
+
+    # Handles simple string dependencies:
+    # - numpy=1.26.4
+    # - matplotlib=3.8.4
+    elif isinstance(dep, str):
+        # Skip Python itself and pip
+        if dep.startswith("python") or dep == "pip":
+            continue
+
+        # Convert conda format package=version to pip format package==version
+        if "=" in dep and "==" not in dep:
+            parts = dep.split("=")
+            if len(parts) >= 2:
+                package = parts[0]
+                version = parts[1]
+                pip_packages.append(f"{package}=={version}")
+        else:
+            pip_packages.append(dep)
+
+print("Installing packages:")
+for pkg in pip_packages:
+    print("  ", pkg)
+
+subprocess.check_call([
+    sys.executable,
+    "-m",
+    "pip",
+    "install",
+    "--upgrade",
+    "--force-reinstall",
+    *pip_packages
+])
 
 torch.manual_seed(0)
 import random

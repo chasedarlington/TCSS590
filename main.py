@@ -22,10 +22,10 @@ from reach_goal.envs.pointmaze_expert import WaypointController
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('using device', device)
 
-torch.manual_seed(0)
+#torch.manual_seed(0)
 import random
-random.seed(0)
-np.random.seed(0)
+#random.seed(0)
+#np.random.seed(0)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -34,7 +34,15 @@ if __name__ == '__main__':
     parser.add_argument('--policy', type=str, default='gaussian', help='choose policy class (gaussian/autoregressive)')
     parser.add_argument('--test', action='store_true', default=False)
     parser.add_argument('--render',  action='store_true', default=False)
+    parser.add_argument('--seed', type=int, default=0) # added for experiment
+    parser.add_argument('--episode_length', type=int, default=None) # added for experiment
+    parser.add_argument('--num_epochs', type=int, default=None) # added for experiment
+    parser.add_argument('--batch_size', type=int, default=None)  # added for experiment
+    
     args = parser.parse_args()
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     if args.render and sys.platform.startswith("linux"):
         import os
         os.environ.setdefault("LD_PRELOAD", "/usr/lib/x86_64-linux-gnu/libGLEW.so")
@@ -85,7 +93,7 @@ if __name__ == '__main__':
 
     # Training hyperparameters for BC
     if args.env == 'reacher':
-        episode_length = 50
+        episode_length = 50 #episode_length, num_epochs, batch_size
         num_epochs = 500
         batch_size = 32
     elif args.env == 'pointmaze':
@@ -94,6 +102,12 @@ if __name__ == '__main__':
         batch_size = 128
     else:
         raise ValueError('Invalid environment')
+    if args.episode_length is not None: #experiment
+        episode_length = args.episode_length #experiment
+    if args.num_epochs is not None: #experiment
+        num_epochs = args.num_epochs #experiment
+    if args.batch_size is not None: #experiment
+        batch_size = args.batch_size #experiment
 
     if not args.test:
         if args.train == 'behavior_cloning':
