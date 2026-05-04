@@ -10,6 +10,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+DEFAULTS = {
+    "num_epochs": 500,
+    "episode_length": 50,
+    "batch_size": 32,
+    "num_validation_runs": 100,
+}
+
+
 def parse_eval_lines(stdout: str):
     """
     Extract evaluation results from lines like:
@@ -28,11 +36,8 @@ def parse_eval_lines(stdout: str):
     successes = []
 
     for match in pattern.finditer(stdout):
-        success = match.group(1) == "True"
-        reward = float(match.group(2))
-
-        successes.append(success)
-        rewards.append(reward)
+        successes.append(match.group(1) == "True")
+        rewards.append(float(match.group(2)))
 
     return rewards, successes
 
@@ -60,7 +65,44 @@ def summarize_numeric(values):
     }
 
 
-def run_main(main_file, env, train, policy, seed, num_epochs, episode_length, batch_size):
+def save_csv(path, fieldnames, rows):
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def first_or_default(values, default):
+    """
+    If user gave --num_epochs 300, values=[300].
+    If omitted, values=None.
+    """
+    if values is None or len(values) == 0:
+        return default
+    return values[0]
+
+
+def values_or_single(values, fallback):
+    """
+    If user gives a list, use the list.
+    Otherwise use the fallback as a one-item list.
+    """
+    if values is None or len(values) == 0:
+        return [fallback]
+    return values
+
+
+def run_main(
+    main_file,
+    env,
+    train,
+    policy,
+    seed,
+    num_epochs,
+    episode_length,
+    batch_size,
+    num_validation_runs,
+):
     command = [
         sys.executable,
         main_file,
@@ -71,6 +113,7 @@ def run_main(main_file, env, train, policy, seed, num_epochs, episode_length, ba
         "--num_epochs", str(num_epochs),
         "--episode_length", str(episode_length),
         "--batch_size", str(batch_size),
+        "--num_validation_runs", str(num_validation_runs),
     ]
 
     completed = subprocess.run(
@@ -82,60 +125,44 @@ def run_main(main_file, env, train, policy, seed, num_epochs, episode_length, ba
     return completed, command
 
 
-def save_csv(path, fieldnames, rows):
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def sweep_one_hyperparameter(
     sweep_name,
     sweep_values,
-    fixed_num_epochs,
-    fixed_episode_length,
-    fixed_batch_size,
+    baseline,
     seeds,
     args,
     output_dir,
     experiment_prefix,
-    show_plots=True,
 ):
     raw_rows = []
     seed_summary_rows = []
     hyper_summary_rows = []
 
-    print(f"\n{'=' * 70}")
+    print("\n" + "=" * 80)
     print(f"Starting sweep: {sweep_name}")
     print(f"Values: {sweep_values}")
     print(
-        f"Fixed settings -> num_epochs={fixed_num_epochs}, "
-        f"episode_length={fixed_episode_length}, batch_size={fixed_batch_size}"
+        "Fixed baseline -> "
+        f"num_epochs={baseline['num_epochs']}, "
+        f"episode_length={baseline['episode_length']}, "
+        f"batch_size={baseline['batch_size']}, "
+        f"num_validation_runs={baseline['num_validation_runs']}"
     )
-    print(f"{'=' * 70}")
+    print("=" * 80)
 
     for sweep_value in sweep_values:
-        print(f"\n--- {sweep_name} = {sweep_value} ---")
+        run_params = dict(baseline)
+        run_params[sweep_name] = sweep_value
 
-        if sweep_name == "num_epochs":
-            num_epochs = sweep_value
-            episode_length = fixed_episode_length
-            batch_size = fixed_batch_size
-        elif sweep_name == "episode_length":
-            num_epochs = fixed_num_epochs
-            episode_length = sweep_value
-            batch_size = fixed_batch_size
-        elif sweep_name == "batch_size":
-            num_epochs = fixed_num_epochs
-            episode_length = fixed_episode_length
-            batch_size = sweep_value
-        else:
-            raise ValueError(f"Unknown sweep_name: {sweep_name}")
+        print(f"\n--- {sweep_name} = {sweep_value} ---")
 
         for seed in seeds:
             print(
-                f"  seed={seed} | num_epochs={num_epochs}, "
-                f"episode_length={episode_length}, batch_size={batch_size}"
+                f"  seed={seed} | "
+                f"num_epochs={run_params['num_epochs']}, "
+                f"episode_length={run_params['episode_length']}, "
+                f"batch_size={run_params['batch_size']}, "
+                f"num_validation_runs={run_params['num_validation_runs']}"
             )
 
             completed, command = run_main(
@@ -144,9 +171,10 @@ def sweep_one_hyperparameter(
                 train=args.train,
                 policy=args.policy,
                 seed=seed,
-                num_epochs=num_epochs,
-                episode_length=episode_length,
-                batch_size=batch_size,
+                num_epochs=run_params["num_epochs"],
+                episode_length=run_params["episode_length"],
+                batch_size=run_params["batch_size"],
+                num_validation_runs=run_params["num_validation_runs"],
             )
 
             if completed.returncode != 0:
@@ -160,9 +188,10 @@ def sweep_one_hyperparameter(
                 raw_rows.append({
                     "sweep_name": sweep_name,
                     "sweep_value": sweep_value,
-                    "num_epochs": num_epochs,
-                    "episode_length": episode_length,
-                    "batch_size": batch_size,
+                    "num_epochs": run_params["num_epochs"],
+                    "episode_length": run_params["episode_length"],
+                    "batch_size": run_params["batch_size"],
+                    "num_validation_runs": run_params["num_validation_runs"],
                     "seed": seed,
                     "eval_episode": "",
                     "status": "failed",
@@ -174,16 +203,17 @@ def sweep_one_hyperparameter(
             rewards, successes = parse_eval_lines(completed.stdout)
 
             if len(rewards) == 0:
-                print("    No evaluation rewards found in output.")
+                print("    No evaluation lines found.")
                 print("    STDOUT tail:")
                 print(completed.stdout[-1500:])
 
                 raw_rows.append({
                     "sweep_name": sweep_name,
                     "sweep_value": sweep_value,
-                    "num_epochs": num_epochs,
-                    "episode_length": episode_length,
-                    "batch_size": batch_size,
+                    "num_epochs": run_params["num_epochs"],
+                    "episode_length": run_params["episode_length"],
+                    "batch_size": run_params["batch_size"],
+                    "num_validation_runs": run_params["num_validation_runs"],
                     "seed": seed,
                     "eval_episode": "",
                     "status": "no_eval_lines_found",
@@ -206,9 +236,10 @@ def sweep_one_hyperparameter(
                 raw_rows.append({
                     "sweep_name": sweep_name,
                     "sweep_value": sweep_value,
-                    "num_epochs": num_epochs,
-                    "episode_length": episode_length,
-                    "batch_size": batch_size,
+                    "num_epochs": run_params["num_epochs"],
+                    "episode_length": run_params["episode_length"],
+                    "batch_size": run_params["batch_size"],
+                    "num_validation_runs": run_params["num_validation_runs"],
                     "seed": seed,
                     "eval_episode": i,
                     "status": "ok",
@@ -219,9 +250,10 @@ def sweep_one_hyperparameter(
             seed_summary_rows.append({
                 "sweep_name": sweep_name,
                 "sweep_value": sweep_value,
-                "num_epochs": num_epochs,
-                "episode_length": episode_length,
-                "batch_size": batch_size,
+                "num_epochs": run_params["num_epochs"],
+                "episode_length": run_params["episode_length"],
+                "batch_size": run_params["batch_size"],
+                "num_validation_runs": run_params["num_validation_runs"],
                 "seed": seed,
                 "eval_count": reward_stats["count"],
                 "mean_reward": reward_stats["mean"],
@@ -276,6 +308,7 @@ def sweep_one_hyperparameter(
             "num_epochs",
             "episode_length",
             "batch_size",
+            "num_validation_runs",
             "seed",
             "eval_episode",
             "status",
@@ -293,6 +326,7 @@ def sweep_one_hyperparameter(
             "num_epochs",
             "episode_length",
             "batch_size",
+            "num_validation_runs",
             "seed",
             "eval_count",
             "mean_reward",
@@ -339,51 +373,46 @@ def sweep_one_hyperparameter(
             mean_success_rates.append(row["mean_success_rate"])
             std_success_rates.append(row["std_success_rate"])
 
-    # ------------------------------------------------------------------
-    # Combined two-segment plot:
-    # Segment 1: average reward
-    # Segment 2: success rate
-    # ------------------------------------------------------------------
-    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(8, 7))
+    combined_plot_path = None
 
-    axes[0].errorbar(
-        x_values,
-        mean_rewards,
-        yerr=std_rewards,
-        marker="o",
-        capsize=5,
-    )
-    axes[0].set_ylabel("Average Evaluation Reward")
-    axes[0].set_title(
-        f"{args.env} / {args.train} / {args.policy}\n"
-        f"Sweep: {sweep_name}"
-    )
-    axes[0].grid(True)
+    if len(x_values) > 0:
+        fig, axes = plt.subplots(2, 1, sharex=True, figsize=(8, 7))
 
-    axes[1].errorbar(
-        x_values,
-        mean_success_rates,
-        yerr=std_success_rates,
-        marker="o",
-        capsize=5,
-    )
-    axes[1].set_xlabel(sweep_name)
-    axes[1].set_ylabel("Success Rate")
-    axes[1].set_ylim(-0.05, 1.05)
-    axes[1].grid(True)
+        axes[0].errorbar(
+            x_values,
+            mean_rewards,
+            yerr=std_rewards,
+            marker="o",
+            capsize=5,
+        )
+        axes[0].set_ylabel("Average Evaluation Reward")
+        axes[0].set_title(
+            f"{args.env} / {args.train} / {args.policy}\n"
+            f"Sweep: {sweep_name}"
+        )
+        axes[0].grid(True)
 
-    combined_plot_path = output_dir / f"{experiment_prefix}_{sweep_name}_reward_and_success.png"
-    plt.tight_layout()
-    plt.savefig(combined_plot_path, dpi=300, bbox_inches="tight")
+        axes[1].errorbar(
+            x_values,
+            mean_success_rates,
+            yerr=std_success_rates,
+            marker="o",
+            capsize=5,
+        )
+        axes[1].set_xlabel(sweep_name)
+        axes[1].set_ylabel("Success Rate")
+        axes[1].set_ylim(-0.05, 1.05)
+        axes[1].grid(True)
 
-    if show_plots:
-        plt.show()
-    else:
-        plt.close()
+        combined_plot_path = output_dir / f"{experiment_prefix}_{sweep_name}_reward_and_success.png"
+        plt.tight_layout()
+        plt.savefig(combined_plot_path, dpi=300, bbox_inches="tight")
 
-    # ------------------------------------------------------------------
-    # Box-whisker reward distribution by seed
-    # ------------------------------------------------------------------
+        if args.no_show:
+            plt.close()
+        else:
+            plt.show()
+
     seed_labels = []
     seed_reward_lists = []
 
@@ -398,6 +427,8 @@ def sweep_one_hyperparameter(
             seed_labels.append(str(seed))
             seed_reward_lists.append(rewards)
 
+    seed_boxplot_path = None
+
     if len(seed_reward_lists) > 0:
         plt.figure(figsize=(8, 5))
         plt.boxplot(seed_reward_lists, tick_labels=seed_labels, showmeans=True)
@@ -409,15 +440,13 @@ def sweep_one_hyperparameter(
         )
         plt.grid(True)
 
-        seed_plot_path = output_dir / f"{experiment_prefix}_{sweep_name}_reward_distribution_by_seed.png"
-        plt.savefig(seed_plot_path, dpi=300, bbox_inches="tight")
+        seed_boxplot_path = output_dir / f"{experiment_prefix}_{sweep_name}_reward_distribution_by_seed.png"
+        plt.savefig(seed_boxplot_path, dpi=300, bbox_inches="tight")
 
-        if show_plots:
-            plt.show()
-        else:
+        if args.no_show:
             plt.close()
-    else:
-        seed_plot_path = None
+        else:
+            plt.show()
 
     print(f"\nSummary for sweep: {sweep_name}")
     print(
@@ -437,18 +466,15 @@ def sweep_one_hyperparameter(
         )
 
     print("\nSaved files:")
-    print(f"  Raw eval results:        {raw_csv}")
-    print(f"  Seed summary:            {seed_csv}")
-    print(f"  Sweep summary:           {hyper_csv}")
-    print(f"  Reward/success plot:     {combined_plot_path}")
-    if seed_plot_path is not None:
-        print(f"  Seed reward boxplot:     {seed_plot_path}")
+    print(f"  Raw eval results:    {raw_csv}")
+    print(f"  Seed summary:        {seed_csv}")
+    print(f"  Sweep summary:       {hyper_csv}")
 
-    return {
-        "raw_rows": raw_rows,
-        "seed_summary_rows": seed_summary_rows,
-        "hyper_summary_rows": hyper_summary_rows,
-    }
+    if combined_plot_path is not None:
+        print(f"  Reward/success plot: {combined_plot_path}")
+
+    if seed_boxplot_path is not None:
+        print(f"  Seed boxplot:        {seed_boxplot_path}")
 
 
 def main():
@@ -458,41 +484,32 @@ def main():
     parser.add_argument("--train", type=str, default="behavior_cloning", choices=["behavior_cloning", "dagger"])
     parser.add_argument("--policy", type=str, default="gaussian", choices=["gaussian", "autoregressive"])
 
-    parser.add_argument(
-        "--num_epochs_values",
-        type=int,
-        nargs="+",
-        default=[10, 50, 100, 250, 500],
-        help="Values for num_epochs sweep.",
-    )
+    # User-friendly singular flags.
+    # These accept variable-length lists so they can be used both as baselines and sweep values.
+    parser.add_argument("--num_epochs", type=int, nargs="+", default=None)
+    parser.add_argument("--episode_length", type=int, nargs="+", default=None)
+    parser.add_argument("--batch_size", type=int, nargs="+", default=None)
+    parser.add_argument("--num_validation_runs", type=int, nargs="+", default=None)
 
-    parser.add_argument(
-        "--episode_length_values",
-        type=int,
-        nargs="+",
-        default=[25, 50, 100],
-        help="Values for episode_length sweep.",
-    )
+    # Backward-compatible aliases.
+    parser.add_argument("--num_epochs_values", type=int, nargs="+", default=None)
+    parser.add_argument("--episode_length_values", type=int, nargs="+", default=None)
+    parser.add_argument("--batch_size_values", type=int, nargs="+", default=None)
+    parser.add_argument("--num_validation_runs_values", type=int, nargs="+", default=None)
 
-    parser.add_argument(
-        "--batch_size_values",
-        type=int,
-        nargs="+",
-        default=[16, 32, 64, 128],
-        help="Values for batch_size sweep.",
-    )
+    # Accept both --seed and --seeds.
+    parser.add_argument("--seed", "--seeds", dest="seeds", type=int, nargs="+", default=[0])
 
+    # Accept both --sweep and --sweeps.
     parser.add_argument(
-        "--seeds",
-        type=int,
+        "--sweep",
+        "--sweeps",
+        dest="sweeps",
+        type=str,
         nargs="+",
-        default=list(range(10)),
-        help="Random seeds.",
+        default=["num_epochs", "episode_length", "batch_size", "num_validation_runs"],
+        choices=["num_epochs", "episode_length", "batch_size", "num_validation_runs"],
     )
-
-    parser.add_argument("--base_num_epochs", type=int, default=500)
-    parser.add_argument("--base_episode_length", type=int, default=50)
-    parser.add_argument("--base_batch_size", type=int, default=32)
 
     parser.add_argument("--main_file", type=str, default="main.py")
     parser.add_argument("--output_dir", type=str, default="plots")
@@ -503,58 +520,78 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True)
 
+    # Resolve baseline values.
+    # If user passes --num_epochs 300, this becomes the baseline.
+    baseline = {
+        "num_epochs": first_or_default(args.num_epochs, DEFAULTS["num_epochs"]),
+        "episode_length": first_or_default(args.episode_length, DEFAULTS["episode_length"]),
+        "batch_size": first_or_default(args.batch_size, DEFAULTS["batch_size"]),
+        "num_validation_runs": first_or_default(
+            args.num_validation_runs,
+            DEFAULTS["num_validation_runs"],
+        ),
+    }
+
+    # Resolve sweep values.
+    # Priority:
+    #   1. explicit *_values flag
+    #   2. singular flag list, e.g. --num_epochs 100 300 500
+    #   3. one-item list using baseline
+    sweep_values_by_name = {
+        "num_epochs": values_or_single(
+            args.num_epochs_values if args.num_epochs_values is not None else args.num_epochs,
+            baseline["num_epochs"],
+        ),
+        "episode_length": values_or_single(
+            args.episode_length_values if args.episode_length_values is not None else args.episode_length,
+            baseline["episode_length"],
+        ),
+        "batch_size": values_or_single(
+            args.batch_size_values if args.batch_size_values is not None else args.batch_size,
+            baseline["batch_size"],
+        ),
+        "num_validation_runs": values_or_single(
+            args.num_validation_runs_values
+            if args.num_validation_runs_values is not None
+            else args.num_validation_runs,
+            baseline["num_validation_runs"],
+        ),
+    }
+
     experiment_prefix = (
         f"{args.env}_{args.train}_{args.policy}"
-        f"_baseEpochs{args.base_num_epochs}"
-        f"_baseEpLen{args.base_episode_length}"
-        f"_baseBatch{args.base_batch_size}"
+        f"_baseEpochs{baseline['num_epochs']}"
+        f"_baseEpLen{baseline['episode_length']}"
+        f"_baseBatch{baseline['batch_size']}"
+        f"_baseValRuns{baseline['num_validation_runs']}"
     )
+
+    config = {
+        **vars(args),
+        "baseline": baseline,
+        "sweep_values_by_name": sweep_values_by_name,
+    }
 
     config_path = output_dir / f"{experiment_prefix}_config.json"
 
     with open(config_path, "w") as f:
-        json.dump(vars(args), f, indent=2)
+        json.dump(config, f, indent=2)
 
     print(f"Saved config: {config_path}")
+    print(f"Resolved baseline: {baseline}")
+    print(f"Resolved sweeps: {args.sweeps}")
+    print(f"Resolved sweep values: {sweep_values_by_name}")
 
-    sweep_one_hyperparameter(
-        sweep_name="num_epochs",
-        sweep_values=args.num_epochs_values,
-        fixed_num_epochs=args.base_num_epochs,
-        fixed_episode_length=args.base_episode_length,
-        fixed_batch_size=args.base_batch_size,
-        seeds=args.seeds,
-        args=args,
-        output_dir=output_dir,
-        experiment_prefix=experiment_prefix,
-        show_plots=not args.no_show,
-    )
-
-    sweep_one_hyperparameter(
-        sweep_name="episode_length",
-        sweep_values=args.episode_length_values,
-        fixed_num_epochs=args.base_num_epochs,
-        fixed_episode_length=args.base_episode_length,
-        fixed_batch_size=args.base_batch_size,
-        seeds=args.seeds,
-        args=args,
-        output_dir=output_dir,
-        experiment_prefix=experiment_prefix,
-        show_plots=not args.no_show,
-    )
-
-    sweep_one_hyperparameter(
-        sweep_name="batch_size",
-        sweep_values=args.batch_size_values,
-        fixed_num_epochs=args.base_num_epochs,
-        fixed_episode_length=args.base_episode_length,
-        fixed_batch_size=args.base_batch_size,
-        seeds=args.seeds,
-        args=args,
-        output_dir=output_dir,
-        experiment_prefix=experiment_prefix,
-        show_plots=not args.no_show,
-    )
+    for sweep_name in args.sweeps:
+        sweep_one_hyperparameter(
+            sweep_name=sweep_name,
+            sweep_values=sweep_values_by_name[sweep_name],
+            baseline=baseline,
+            seeds=args.seeds,
+            args=args,
+            output_dir=output_dir,
+            experiment_prefix=experiment_prefix,
+        )
 
 
 if __name__ == "__main__":

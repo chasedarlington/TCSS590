@@ -1,5 +1,5 @@
 """
-DO NOT MODIFY BESIDES HYPERPARAMETERS 
+DO NOT MODIFY BESIDES HYPERPARAMETERS
 """
 
 import sys
@@ -38,7 +38,8 @@ if __name__ == '__main__':
     parser.add_argument('--episode_length', type=int, default=None) # added for experiment
     parser.add_argument('--num_epochs', type=int, default=None) # added for experiment
     parser.add_argument('--batch_size', type=int, default=None)  # added for experiment
-    
+    parser.add_argument("--num_validation_runs", type=int, default=100) # added for experiment
+
     args = parser.parse_args()
     torch.manual_seed(args.seed)
     random.seed(args.seed)
@@ -56,16 +57,16 @@ if __name__ == '__main__':
         raise ValueError('Invalid environment')
     expert_data = get_expert_data(file_path)
 
-    flattened_expert = {'observations': [], 
+    flattened_expert = {'observations': [],
                         'actions': []}
-    
+
     for expert_path in expert_data:
         for k in flattened_expert.keys():
             flattened_expert[k].append(expert_path[k])
 
     for k in flattened_expert.keys():
         flattened_expert[k] = np.concatenate(flattened_expert[k])
-    
+
     # Define environment
     if args.env == 'reacher':
         env = gym.make("Reacher-v4", render_mode='human' if args.render else None)
@@ -85,9 +86,9 @@ if __name__ == '__main__':
         policy = PolicyGaussian(num_inputs=obs_size, num_outputs=ac_size, hidden_dim=hidden_dim, hidden_depth=hidden_depth)
     elif args.policy == 'autoregressive':
         num_buckets = 10
-        policy = PolicyAutoRegressiveModel(num_inputs=obs_size, num_outputs=ac_size, hidden_dim=hidden_dim, 
-                                            hidden_depth=hidden_depth, num_buckets=num_buckets, 
-                                            ac_low=flattened_expert['actions'].min(axis=0) - ac_margin, 
+        policy = PolicyAutoRegressiveModel(num_inputs=obs_size, num_outputs=ac_size, hidden_dim=hidden_dim,
+                                            hidden_depth=hidden_depth, num_buckets=num_buckets,
+                                            ac_low=flattened_expert['actions'].min(axis=0) - ac_margin,
                                             ac_high=flattened_expert['actions'].max(axis=0) + ac_margin)
     policy.to(device)
 
@@ -96,10 +97,12 @@ if __name__ == '__main__':
         episode_length = 50 #episode_length, num_epochs, batch_size
         num_epochs = 500
         batch_size = 32
+        num_validation_runs = 100
     elif args.env == 'pointmaze':
         episode_length = 300
         num_epochs = 10
         batch_size = 128
+        num_validation_runs = 100
     else:
         raise ValueError('Invalid environment')
     if args.episode_length is not None: #experiment
@@ -108,6 +111,8 @@ if __name__ == '__main__':
         num_epochs = args.num_epochs #experiment
     if args.batch_size is not None: #experiment
         batch_size = args.batch_size #experiment
+    if args.num_validation_runs is not None: #experiment
+        num_validation_runs = args.num_validation_runs #experiment
 
     if not args.test:
         if args.train == 'behavior_cloning':
@@ -142,4 +147,4 @@ if __name__ == '__main__':
         policy.load_state_dict(torch.load(f'{args.policy}_{args.env}_{args.train}_final.pth', map_location=device))
 
     # Code for policy evaluation post training
-    evaluate(env, policy, args.train, num_validation_runs=100, episode_length=episode_length, render=args.render, env_name=args.env)
+    evaluate(env, policy, args.train, num_validation_runs=num_validation_runs, episode_length=episode_length, render=args.render, env_name=args.env)
