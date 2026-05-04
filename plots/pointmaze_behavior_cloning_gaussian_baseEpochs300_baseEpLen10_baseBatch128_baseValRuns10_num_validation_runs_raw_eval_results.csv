@@ -1,0 +1,5 @@
+sweep_name,sweep_value,num_epochs,episode_length,batch_size,num_validation_runs,seed,eval_episode,status,reward,success
+num_validation_runs,10,300,10,128,10,0,,no_eval_lines_found,nan,
+num_validation_runs,10,300,10,128,10,1,,no_eval_lines_found,nan,
+num_validation_runs,20,300,10,128,20,0,,no_eval_lines_found,nan,
+num_validation_runs,20,300,10,128,20,1,,no_eval_lines_found,nan,
