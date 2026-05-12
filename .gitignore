@@ -1,7 +1,5 @@
 # Python
 __pycache__/
-*.pkl
-*.pth
 *.py[cod]
 *$py.class
 *.so
@@ -19,6 +17,7 @@ env/
 
 # Jupyter
 .ipynb_checkpoints/
+*.ipynb
 
 # IDE
 .vscode/
@@ -28,6 +27,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+*.html
 
 # MuJoCo
 MUJOCO_LOG.TXT
