@@ -1,7 +1,7 @@
 ---
-title: "Coding Assignment 1: Supervised Learning of Behaviors"
+title: "Coding Assignment 2: Policy Gradient and Actor Critic"
 author: "Cole Buckingham (colbuc@uw.edu), Chase Darlington (darlchas@uw.edu)"
-date: "April 29, 2026"
+date: "May 12, 2026"
 output:
   html_document:
     css: styles.css
@@ -16,16 +16,7 @@ output:
 
 ## Introduction
 
-For this assignment, we explored imitation learning methods, specifically Behavior Cloning (BC), DAgger, and the comparison between Gaussian and autoregressive policies.
-
-The goal was to understand compounding errors, multimodality in action spaces, and how dataset aggregation can improve performance in imitation learning.
-
-We evaluated performance using two environments:
-
-- Reacher
-- PointMaze
-
-**Note:** The document was split between Cole and Chase, and we cross-referenced our data to identify the best-performing results.
+d
 
 ---
 
