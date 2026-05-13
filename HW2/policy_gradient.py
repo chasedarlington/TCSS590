@@ -31,6 +31,9 @@ def train_model(policy, baseline, trajs, policy_optim, baseline_optim, device, g
         # TODO START
 
         # TODO: Compute the return to go on the current batch of trajectories
+        #       For each time step t, compute the sum of future rewards from t to the end of that trajectory.
+        
+
         # Hint: Go through all the trajectories in trajs and compute their return to go: discounted sum of rewards from that timestep to the end.
         # Hint: This is easy to do if you go backwards in time and sum up the reward as a running sum.
         # Hint: Remember that return to go is return = r[t] + gamma*r[t+1] + gamma^2*r[t+2] + .... Don't forget the discount!

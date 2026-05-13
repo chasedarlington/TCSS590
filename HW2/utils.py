@@ -128,7 +128,7 @@ def collect_trajs(
 
     path_length = 0
 
-    o = env.reset()
+    o, info = env.reset() # (+info) UPDATED TO REFLECT NEW GYM API
     if render:
         env.render()
 
@@ -139,7 +139,7 @@ def collect_trajs(
         action= action.cpu().detach().numpy()[0]
 
         # Step the simulation forward
-        next_o, r, done, env_info = env.step(copy.deepcopy(action))
+        next_o, r, done, truncated, env_info = env.step(copy.deepcopy(action)) # (+truncated) UPDATED TO REFLECT NEW GYM API
 
         replay_buffer.add(o,
                           action,
@@ -219,18 +219,18 @@ def rollout(
     agent_info = None
     path_length = 0
 
-    o = env.reset()
+    o, info = env.reset() # (+info) UPDATED TO REFLECT NEW GYM API
     if render:
         env.render()
 
     while path_length < episode_length:
-        o_for_agent = o
+        o_for_agent = o # UPDATED TO REFLECT NEW GYM API
 
         action, _, _ = agent(torch.Tensor(o_for_agent).unsqueeze(0).to(device))
         action = action.cpu().detach().numpy()[0]
 
         # Step the simulation forward
-        next_o, r, done, env_info = env.step(copy.deepcopy(action))
+        next_o, r, done, truncated, env_info = env.step(copy.deepcopy(action)) # (+truncated) UPDATED TO REFLECT NEW GYM API
 
         # Render the environment
         if render:
@@ -244,7 +244,7 @@ def rollout(
         path_length += 1
         if done:
             break
-        o = next_o
+        obs = next_o
 
     # Prepare the items to be returned
     observations = np.array(raw_obs)

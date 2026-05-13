@@ -13,7 +13,7 @@ def evaluate(env, policy, num_validation_runs=10, episode_length=200, render=Fal
     rewards_suc = 0
     rewards_all = 0
     for k in range(num_validation_runs):
-        o = env.reset()
+        o, info = env.reset() # (+info) UPDATED TO REFLECT NEW GYM API
         path = rollout(
                 env,
                 policy,
