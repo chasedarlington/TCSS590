@@ -16,10 +16,9 @@ dependencies:
     - mujoco-py==2.1.2.14
     - numpy==1.24.3
     - packaging==23.1
-    - torch==1.13.1
+    - torch
     - torchvision
     - torchaudio
     - wheel==0.38.0
     - libglew-dev
     - patchelf
-    - 
