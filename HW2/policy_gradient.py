@@ -63,7 +63,11 @@ def train_model(policy, baseline, trajs, policy_optim, baseline_optim, device, g
             batch_index = torch.LongTensor(batch_index).to(device)
             # TODO START
             # TODO: Train baseline by regressing onto returns
+            #
+
             # Hint: Regress the baseline from each state onto the above computed return to go. You can use similar code to behavior cloning to do so.
+
+
             # Hint: Iterate for baseline_num_epochs with batch size = baseline_train_batch_size
             # TODO END
             baseline_optim.zero_grad()

@@ -1,7 +1,5 @@
 import gymnasium as gym
 import numpy as np
-import time
-import matplotlib.pyplot as plt
 import torch
 import argparse
 from policy_gradient import simulate_policy_pg
@@ -28,7 +26,7 @@ if __name__ == '__main__':
         import os
         os.environ["LD_PRELOAD"] = "/usr/lib/x86_64-linux-gnu/libGLEW.so"
 
-    env = gym.make("InvertedPendulum-v2")
+    env = gym.make("InvertedPendulum-v4") # trying v4 instead of v2
 
     if args.task == 'policy_gradient':
         # Define policy and value function
