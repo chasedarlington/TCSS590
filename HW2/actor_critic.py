@@ -7,9 +7,9 @@ import collections
 import math
 import time
 from typing import Any, Callable, Dict, Optional, Sequence, List
-import gym
+import gymnasium as gymnasium as gym
 import torch.nn.functional as F
-from gym import utils
+from gymnasium import utils
 from utils import mlp
 import copy
 from typing import Tuple, Optional, Union

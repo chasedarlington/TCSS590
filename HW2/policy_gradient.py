@@ -9,8 +9,8 @@ import functools
 import math
 import time
 from typing import Any, Callable, Dict, Optional, Sequence, List
-import gym
-from gym import utils
+import gymnasium as gym
+from gymnasium import utils
 import torch.nn.functional as F
 import copy
 from typing import Tuple, Optional, Union
