@@ -28,11 +28,12 @@ def train_model(policy,baseline,trajs,policy_optim,baseline_optim,device,gamma=0
     indices = np.arange(n)
     for _ in range(baseline_num_epochs):
         np.random.shuffle(indices)
-        for i in range(0, n, baseline_train_batch_size):                                                #range(n // baseline_train_batch_size):
-            batch_indices = indices[baseline_train_batch_size * i : baseline_train_batch_size * (i + 1)]
+        for i in range(0, n, baseline_train_batch_size):                                                # range(n // baseline_train_batch_size):
+            batch_indices = indices[i : i + baseline_train_batch_size]                                  # indices[baseline_train_batch_size * i : baseline_train_batch_size * (i + 1)]
             batch_indices = torch.LongTensor(batch_indices).to(device)
             obs_batch = torch.from_numpy(states[batch_indices.cpu()]).float().to(device)
             returns_batch = torch.from_numpy(returns[batch_indices.cpu()]).float().to(device)
+            returns_batch = returns_batch.squeeze(-1)                                                      # add squeeze
             baseline_pred = baseline(obs_batch).squeeze(-1)
             baseline_loss = torch.nn.functional.mse_loss(baseline_pred, returns_batch)
             baseline_optim.zero_grad()

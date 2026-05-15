@@ -240,11 +240,11 @@ def rollout(
         raw_next_obs.append(next_o)
         actions.append(action)
         rewards.append(r)
-        dones.append(done)
+        dones.append(done or truncated) # UPDATED TO REFLECT NEW GYM API
         path_length += 1
-        if done:
+        if done or truncated: # UPDATED TO REFLECT NEW GYM API
             break
-        obs = next_o
+        o = next_o
 
     # Prepare the items to be returned
     observations = np.array(raw_obs)

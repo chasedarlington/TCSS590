@@ -17,95 +17,169 @@ from typing import Tuple, Optional, Union
 import matplotlib.pyplot as plt
 from utils import rollout, log_density
 
-def train_model(policy, baseline, trajs, policy_optim, baseline_optim, device, gamma=0.99, baseline_train_batch_size=64,
-                baseline_num_epochs=5):
-    # Fill in your policy gradient implementation here
-    states_all = []
-    actions_all = []
-    returns_all = []
+"""
+Train one policy-gradient update using collected trajectory data.
+Also trains the baseline network to predict returns.
+"""
+def train_model(
+        policy, 
+        baseline, 
+        trajs, 
+        policy_optim, 
+        baseline_optim, 
+        device, 
+        gamma=0.99, 
+        baseline_train_batch_size=64,
+        baseline_num_epochs=5
+):
+    
+    states_all = [] # OBSERVATIONS
+    actions_all = [] # ACTIONS
+    returns_all = [] # DISCOUNTED SUM OF FUTURE REWARDS (RETURN TO GO)
+    # log_probs_all = [] # LOG PROBABILITIES OF ACTIONS UNDER THE POLICY
+
+    ### FLATTEN TRAJECTORIES INTO STATES, ACTIONS, REWARDS, AND DISCOUNTED RETURNS !!!
     for traj in trajs:
-        states_singletraj = traj['observations']
-        actions_singletraj = traj['actions']
-        rewards_singletraj = traj['rewards']
-        returns_singletraj = np.zeros_like(rewards_singletraj)
-        # TODO START
-
-        # TODO: Compute the return to go on the current batch of trajectories
-        #       For each time step t, compute the sum of future rewards from t to the end of that trajectory.
+        states_singletraj = traj['observations'] # OBSERVATIONS !!
+        actions_singletraj = traj['actions'] # ACTIONS !!
+        rewards_singletraj = traj['rewards'] # REWARDS !!
+        returns_singletraj = np.zeros_like(rewards_singletraj) # DISCOUNTED RETURNS !!
+        # log_probs_singletraj = traj['log_probs'] # LOG PROBABILITIES OF ACTIONS UNDER THE POLICY !!
         
+        running_return = 0.0
+        for reward in reversed(rewards_singletraj):
 
-        # Hint: Go through all the trajectories in trajs and compute their return to go: discounted sum of rewards from that timestep to the end.
-        # Hint: This is easy to do if you go backwards in time and sum up the reward as a running sum.
-        # Hint: Remember that return to go is return = r[t] + gamma*r[t+1] + gamma^2*r[t+2] + .... Don't forget the discount!
-        # Hint: Use np.cumsum going backwards through the trajectory to compute the returns to go.
+            # note: running return is the current reward + gamma * prior sum of rewards
+            running_return = reward + gamma * running_return 
+            
+            # note: inject running return at the front of the returns NumPy array, 
+            #   so that returns_singletraj[t] is the RETURN TO GO from time step t
+            returns_singletraj = np.insert(returns_singletraj, 0, running_return)
 
-        # TODO END
-        states_all.append(states_singletraj)
-        actions_all.append(actions_singletraj)
-        returns_all.append(returns_singletraj)
-    states = np.concatenate(states_all)
-    actions = np.concatenate(actions_all)
-    returns = np.concatenate(returns_all)
+        states_all.append(states_singletraj) # append observations
+        actions_all.append(actions_singletraj) # append actions
+        returns_all.append(returns_singletraj) # append discounted returns
+        # log_probs_all.append(log_probs_singletraj) # append log probabilities of actions under the policy
 
-    # TODO: Normalize the returns by subtracting mean and dividing by std
-    # TODO START
-    # Hint: Just subtract mean and divide by (return.std() + EPS), where EPS is a small constant for numerics
-    # TODO END
+    ## for NumPy arrays...
+    states = np.concatenate(states_all) # concatenate all observations (into one NumPy array)
+    actions = np.concatenate(actions_all) # concatenate all actions (into one NumPy array)
+    returns = np.concatenate(returns_all) # concatenate all discounted returns (into one NumPy array)
+    # log_probs = np.concatenate(log_probs_all) # concatenate all log probabilities of actions under the policy (into one NumPy array)
 
+    ## for PyTorch tensors...
+    # states = torch.tensor(states, dtype=torch.float32, device=device).to(device) 
+    # actions = torch.tensor(actions, dtype=torch.float32, device=device).to(device)
+    # returns = torch.tensor(returns_all, dtype=torch.float32, device=device).to(device) 
+    # log_probs = torch.stack(all_log_probs).to(device)
+        
+    #### TRAIN BASELINE NETWORK TO PREDICT RETURNS !!!
+    
+    ## if states is a NumPy array:
+    n = len(states)  
+    indices = np.arange(n)
+    
+    ## ??? ? ?? ? ? ? ? ? 
+    # criterion = torch.nn.MSELoss() 
+    
+    ## if states is a PyTorch tensor:
+    # n = states.shape[0]
 
-    criterion = torch.nn.MSELoss()
-    n = len(states)
-    arr = np.arange(n)
-    for epoch in range(baseline_num_epochs):
-        np.random.shuffle(arr)
-        for i in range(n // baseline_train_batch_size):
-            batch_index = arr[baseline_train_batch_size * i: baseline_train_batch_size * (i + 1)]
-            batch_index = torch.LongTensor(batch_index).to(device)
-            # TODO START
-            # TODO: Train baseline by regressing onto returns
-            #
+    for _ in range(baseline_num_epochs):
+        
+        ## DO THE SHUFFLE !!
+        
+        ## if n were a numpy array:
+        np.random.shuffle(indices)
+ 
+        ## if n were a tensor: 
+        #   indices = torch.randperm(n, device=device) 
+        
+        for i in range(n // baseline_train_batch_size): # or range(0, n, baseline_train_batch_size)
+            
+            ## send concatenated states and returns to device, but only for the current batch of data (batch_indices)
+            
+            ## if states & actions are numpy arrays: --> CONVERT TO TENSOR !! 
+            batch_indices = indices[baseline_train_batch_size * i : baseline_train_batch_size * (i + 1)] # get batch indices for current batch
+            batch_indices = torch.LongTensor(batch_indices).to(device) # convert batch indices to tensor and send to device
+            obs_batch = torch.from_numpy(states[batch_indices.cpu()]).float().to(device) # get batch observations (states) and send to device
+            returns_batch = torch.from_numpy(returns[batch_indices.cpu()]).float().to(device) # get batch returns and send to device
 
-            # Hint: Regress the baseline from each state onto the above computed return to go. You can use similar code to behavior cloning to do so.
+            ## alternate to the above ? ? ? ? ? ? ? ? ?  ? ? ? ? ? ?  ? ? ? ?? 
+            # end = i + baseline_train_batch_size
+            # batch_indices = indices[i:end] 
+            # obs_batch = torch.from_numpy(states[batch_indices]).float().to(device)
+            # returns_batch = torch.from_numpy(returns[batch_indices]).float().to(device)
 
+            ## if states & actions are tensors: 
+            # end = i + baseline_train_batch_size
+            # batch_indices = indices[i:end]
+            # obs_batch = states[batch_indices])
+            # returns_batch = returns[batch_indices]
+            
+            ## Pass observations (states) to baseline network, then remove final singleton dimension
+            baseline_pred = baseline(obs_batch).squeeze(-1) 
 
-            # Hint: Iterate for baseline_num_epochs with batch size = baseline_train_batch_size
-            # TODO END
+            ## compute MSE loss (baseline predictions vs actual returns) for returns batch
+            baseline_loss = torch.nn.functional.mse_loss(baseline_pred, returns_batch)
+
             baseline_optim.zero_grad()
-            loss.backward()
+            baseline_loss.backward()
             baseline_optim.step()
 
+    #### COMPUTE ADVANTAGES
+    with torch.no_grad():
 
-    action, std, logstd = policy(torch.Tensor(states).to(device))
+        ## if observations (states) were a numpy array:
+        baseline_values = baseline(torch.from_numpy(states).float().to(device)).squeeze(-1) # compute baseline predictions for all states (observations) in the trajectories
+        advantages = torch.from_numpy(returns).float().to(device) - baseline_values # compute advantages (returns - baseline predictions)
+
+        ## if observations (states) were a tensor: 
+        #   baseline_values = baseline(observations_tensor).squeeze(-1)
+        #   advantages = returns_tensor - baseline_values
+        
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # normalize advantages (zero mean, unit variance)
+
+    #### TRAIN POLICY NETWORK TO OPTIMIZE SURROGATE OBJECTIVE !!! 
+
+    ### CALCULATE LOSS W/ CALCULATED LOG PROBS USING LOG_DENSITY FXN:
+
+    ## if observations & actions are numpy arrays:
+    actions, std, logstd = policy(torch.Tensor(states).to(device))
     log_policy = log_density(torch.Tensor(actions).to(device), policy.mu, std, logstd)
     baseline_pred = baseline(torch.from_numpy(states).float().to(device))
-    # TODO START
+    advantages = returns - baseline_pred.detach() # compute advantages (returns - baseline predictions) and detach baseline predictions from computation graph (so that we don't backprop through the baseline network when updating the policy network)
+    
+    ## if observations & actions are tensors:
+    # action, std, logstd = policy(observations_tensor.to(device))
+    # log_policy = log_density(actions_tensor.to(device), policy.mu, std, logstd
+    # baseline_pred = baseline(observations_tensor.to(device))
+    # advantages = returns - baseline_pred.detach()
+    
+    ## calc surrogate objective (negative b/c we want to maximize):
+    policy_loss = -(log_policy * advantages) # sum over all data points in the batch (instead of averaging, as below)
+    # policy_loss = -(log_policy * advantages).mean() # average over all data points in the batch (instead of summing, as above)
 
-    # TODO: Train policy by optimizing surrogate objective: -log prob * (return - baseline)
-    # Hint: Policy gradient is given by: \grad log prob(a|s)* (return - baseline)
-    # Hint: Return is computed above, you can computer log_probs using the log_density function imported.
-    # Hint: You can predict what the baseline outputs for every state.
-    # Hint: Then simply compute the surrogate objective by taking the objective as -log prob * (return - baseline)
-    # Hint: You can then use standard pytorch machinery to take *one* gradient step on the policy
-
-    # TODO END
+    ### CALCULATING LOSS W/ LOG PROBS OF ACTIONS UNDER THE POLICY: 
+    #   (instead of calculating log probs from scratch using log_density fxn, as above)
+    # policy_loss = -(log_probs * advantages) # sum over all data points in the batch (instead of averaging, as below)
+    # policy_loss = -(log_probs * advantages).mean() # average over all data points in the batch (instead of summing, as above)
 
     policy_optim.zero_grad()
-    loss.backward()
+    policy_loss.backward()
     policy_optim.step()
 
-    del states, actions, returns, states_all, actions_all, returns_all
+    ### OPTIONAL: DELETE VARIABLES TO FREE UP MEMORY
+    del states, actions, returns, states_all, actions_all, returns_all 
 
-
-# Training loop for policy gradient
 def simulate_policy_pg(env, policy, baseline, num_epochs=200, max_path_length=200, batch_size=100,
                        gamma=0.99, baseline_train_batch_size=64, baseline_num_epochs=5, print_freq=10, device = "cuda", render=False):
+    
     policy_optim = optim.Adam(policy.parameters())
     baseline_optim = optim.Adam(baseline.parameters())
 
     for iter_num in range(num_epochs):
         sample_trajs = []
-
-        # Sampling trajectories
         for it in range(batch_size):
             sample_traj = rollout(
                 env,
