@@ -3,12 +3,11 @@ DO NOT MODIFY BESIDES HYPERPARAMETERS
 """
 import torch
 import numpy as np
-
 from utils import rollout
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def evaluate(env, policy, num_validation_runs=10, episode_length=200, render=False):
+def evaluate(env, policy, device,num_validation_runs, episode_length, render):
     success_count = 0
     rewards_suc = 0
     rewards_all = 0
@@ -17,6 +16,7 @@ def evaluate(env, policy, num_validation_runs=10, episode_length=200, render=Fal
         path = rollout(
                 env,
                 policy,
+                device,
                 episode_length=episode_length,
                 render=render)
         success = len(path['dones']) == episode_length

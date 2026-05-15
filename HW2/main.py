@@ -8,9 +8,17 @@ from actor_critic import simulate_policy_ac, ReplayBuffer
 from utils import ACPolicy, QF, TargetQF, PGPolicy, PGBaseline
 from evaluate import evaluate
 import random
+import sys
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print('using device', device)
+# OVERRIDING GPU USE BECAUSE THE CURRENT PG IMPLEMENTATION IS MORE SEQUENTIAL
+# environment and NumPy work stay on CPU
+device = torch.device('cpu')    # torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+print("torch version:", torch.__version__)
+print("torch cuda available:", torch.cuda.is_available())
+print("torch cuda version:", torch.version.cuda)
+print("cuda device count:", torch.cuda.device_count())
+print('using device:', device)
 
 torch.manual_seed(0)
 random.seed(0)
@@ -33,12 +41,7 @@ if __name__ == '__main__':
         import os
         os.environ["LD_PRELOAD"] = "/usr/lib/x86_64-linux-gnu/libGLEW.so"
 
-    env = gym.make("InvertedPendulum-v4", render_mode="human" if args.render else None) # trying v4 instead of v2
-    
-    print(type(env))
-    print(env)
-    print(type(env.unwrapped))
-    print(env.unwrapped)
+    env = gym.make("InvertedPendulum-v5", render_mode="human" if args.render else None) # trying v5 instead of v2
 
     if args.task == 'policy_gradient':
 
@@ -88,7 +91,7 @@ if __name__ == '__main__':
             policy.load_state_dict(torch.load(f'pg_final.pth'))
         
         # EVALUATE: Run the policy in the environment x times, for up to max_path_length steps each time, optionally render the environment
-        evaluate(env, policy,  num_validation_runs=eval_ep_count, episode_length=max_path_length, render=args.render)
+        evaluate(env,policy,device,num_validation_runs=eval_ep_count, episode_length=max_path_length, render=args.render)
 
     if args.task == 'actor_critic':
 
@@ -110,6 +113,7 @@ if __name__ == '__main__':
         num_update_steps = 100
         print_freq = 10
         eval_ep_count=100
+        ep_length=200
 
         # ACTOR CRITIC POLICY: self.trunk = mlp(num_inputs, hidden_dim, num_outputs*2, hidden_depth)
         policy = ACPolicy(env.observation_space.shape[0], env.action_space.shape[0], hidden_dim=hidden_dim, hidden_depth=hidden_depth).to(device)
@@ -136,4 +140,5 @@ if __name__ == '__main__':
             policy.load_state_dict(torch.load(f'ac_final.pth'))
 
         # EVALUATE: Run the policy in the environment x times, for up to max_path_length steps each time, optionally render the environment
-        evaluate(env, policy,  num_validation_runs=eval_ep_count, episode_length=episode_length, render=args.render)
+        evaluate(env, policy,  num_validation_runs=eval_ep_count, episode_length=ep_length, render=args.render)
+        

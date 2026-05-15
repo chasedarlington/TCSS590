@@ -11,7 +11,7 @@ from torch import distributions as pyd
 import torch.optim as optim
 from torch.distributions import Categorical
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cpu")    # torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def log_density(x, mu, std, logstd):
     var = std.pow(2)
@@ -35,8 +35,8 @@ class PGPolicy(nn.Module):
         return action, std, log_std
 
     def dist_create(self, logits):
-        min_log_std = -5
-        max_log_std = 5
+        min_log_std = -5                                                    ######################################################
+        max_log_std = 5                                                     ######################################################                                    
         loc, scale = torch.split(logits, logits.shape[-1] // 2, dim=-1)
         loc = torch.tanh(loc)
 
@@ -80,7 +80,7 @@ class ACPolicy(nn.Module):
         return loc, std, log_std
 
     def dist_sample_no_postprocess(self, mu, std):
-        action = torch.zeros((mu.shape[0], 1)).to(device)
+        action = torch.zeros((mu.shape[0], 1)).to(device=mu.device)
         # TODO START
         # Hint: perform the reparameterization trick - action = mean + epsilon*std, where epsilon \sim N(0, I)
         # This will allow policy updates through gradient based updates via pathwise derivatives
@@ -137,6 +137,7 @@ def collect_trajs(
 
         action, _, _ = agent(torch.Tensor(o_for_agent).unsqueeze(0).to(device))
         action= action.cpu().detach().numpy()[0]
+        # action = np.clip(action, env.action_space.low, env.action_space.high)                                                     ######################################################
 
         # Step the simulation forward
         next_o, r, done, truncated, env_info = env.step(copy.deepcopy(action)) # (+truncated) UPDATED TO REFLECT NEW GYM API
@@ -203,6 +204,7 @@ def mlp(input_dim, hidden_dim, output_dim, hidden_depth, output_mod=None):
 def rollout(
         env,
         agent,
+        device,
         episode_length=math.inf,
         render=False,
 ):
