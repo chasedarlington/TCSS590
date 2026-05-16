@@ -1,8 +1,6 @@
-import os
 import torch
 import numpy as np
 from torch import optim
-import torch.nn.functional as F
 from utils import rollout, log_density
 
 def train_model(policy,baseline,trajs,policy_optim,baseline_optim,device,gamma=0.99,baseline_train_batch_size=64,baseline_num_epochs=5):
