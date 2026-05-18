@@ -97,7 +97,7 @@ if __name__ == '__main__':
         # REPLAY BUFFER
         obs_size = env.observation_space.shape[0]
         ac_size = env.action_space.shape[0]
-        capacity=10000  
+        capacity=50000 # 10000
         replay_buffer = ReplayBuffer(obs_size, ac_size, capacity, device)
 
         # NEURAL NET ARCHITECTURE (POLICY)
@@ -139,5 +139,5 @@ if __name__ == '__main__':
             policy.load_state_dict(torch.load(f'ac_final.pth'))
 
         # EVALUATE: Run the policy in the environment x times, for up to max_path_length steps each time, optionally render the environment
-        evaluate(env, policy,  num_validation_runs=eval_ep_count, episode_length=ep_length, render=args.render)
+        evaluate(env,policy,device,num_validation_runs=eval_ep_count,episode_length=ep_length,render=args.render)
         

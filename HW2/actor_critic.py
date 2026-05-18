@@ -1,8 +1,16 @@
 import torch
 from torch import optim
+import torch.nn.functional as F
 import copy
 import numpy as np
 from utils import collect_trajs
+
+def print_shape(name, tensor):
+    print(f"{name}: shape={tuple(tensor.shape)}, ndim={tensor.dim()}")
+    for i, size in enumerate(tensor.shape):
+        print(f"  dim={i}: size={size}")
+    print(f"  dim=-1 refers to dim={tensor.dim() - 1}")
+    print()
 
 class ReplayBuffer(object):
     """Buffer to store environment transitions."""
@@ -25,15 +33,25 @@ class ReplayBuffer(object):
         return self.capacity if self.full else self.idx
 
     def add(self, obs, action, reward, next_obs, done):
-        idxs = np.arange(self.idx, self.idx + obs.shape[0]) % self.capacity
-        self.obses[idxs] = copy.deepcopy(obs)
-        self.actions[idxs] = copy.deepcopy(action)
-        self.rewards[idxs] = copy.deepcopy(reward)
-        self.next_obses[idxs] = copy.deepcopy(next_obs)
-        self.not_dones[idxs] = 1.0 - copy.deepcopy(done)
+        obs = np.asarray(obs, dtype=np.float32).reshape(-1, self.obses.shape[1])
+        action = np.asarray(action, dtype=np.float32).reshape(-1, self.actions.shape[1])
+        reward = np.asarray(reward, dtype=np.float32).reshape(-1, 1)
+        next_obs = np.asarray(next_obs, dtype=np.float32).reshape(-1, self.next_obses.shape[1])
+        done = np.asarray(done, dtype=np.float32).reshape(-1, 1)
 
-        self.full = self.full or (self.idx + obs.shape[0] >= self.capacity)
-        self.idx = (self.idx + obs.shape[0]) % self.capacity
+        num_samples = obs.shape[0]
+        if not (action.shape[0] == reward.shape[0] == next_obs.shape[0] == done.shape[0] == num_samples):
+            raise ValueError("ReplayBuffer.add received inputs with different batch sizes")
+
+        idxs = np.arange(self.idx, self.idx + num_samples) % self.capacity
+        self.obses[idxs] = obs #copy.deepcopy(obs)
+        self.actions[idxs] = action #copy.deepcopy(action)
+        self.rewards[idxs] = reward #copy.deepcopy(reward)
+        self.next_obses[idxs] = next_obs #copy.deepcopy(next_obs)
+        self.not_dones[idxs] = 1.0 - done #copy.deepcopy(done)
+
+        self.full = self.full or (self.idx + num_samples >= self.capacity)
+        self.idx = (self.idx + num_samples) % self.capacity
 
     def sample(self, batch_size):
         idxs = np.random.randint(0,
@@ -49,26 +67,74 @@ class ReplayBuffer(object):
         return obses, actions, rewards, next_obses, not_dones
 
 
-
 def compute_losses(policy, qf, target_qf, obs_t, actions_t, rewards_t, next_obs_t, not_dones_t, device, discount=0.99):
-    obs_t = torch.as_tensor(obs_t, device=device, dtype=torch.float32)
-    actions_t = torch.as_tensor(actions_t, device=device, dtype=torch.float32)
-    rewards_t = torch.as_tensor(rewards_t, device=device, dtype=torch.float32)
-    next_obs_t = torch.as_tensor(next_obs_t, device=device, dtype=torch.float32)
-    not_dones_t = torch.as_tensor(not_dones_t, device=device, dtype=torch.float32)
+    #policy_loss = torch.Tensor(np.array([0])).to(device)
+    #qf_loss = torch.Tensor(np.array([0])).to(device)
+
+    obs_t = torch.as_tensor(obs_t, device=device).float()
+    actions_t = torch.as_tensor(actions_t, device=device).float()
+    rewards_t = torch.as_tensor(rewards_t, device=device).float()
+    next_obs_t = torch.as_tensor(next_obs_t, device=device).float()
+    not_dones_t = torch.as_tensor(not_dones_t, device=device).float()
+
+    #print_shape("obs_t", obs_t)
+    #print_shape("actions_t", actions_t)
+    #print_shape("next_obs_t", next_obs_t)
+
+    # TODO START
+    # Hint: compute policy_loss and qf_loss.
 
     # Policy loss:
-    a_sampled_t, _, _ = policy(obs_t) # get (differentiable) action samples a_sampled_t from the policy using policy.forward
-    policy_q = qf(torch.cat([obs_t, a_sampled_t], dim=-1)) #Compute the Q values as qf(obs_t, a_sampled_t)
-    policy_loss = -policy_q.mean() #Policy loss is the mean over negative Q values
+    # Hint: Step 1: Get (differentiable) action samples a_sampled_t from the policy using policy.forward
+    # Hint: Step 2: Compute the Q values as qf(torch.cat([obs_t, a_sampled_t], dim=-1))
+    # Hint: Step 3: Policy loss is the mean over negative Q values
 
     # QF loss:
-    q_pred = qf(torch.cat([obs_t, actions_t], dim=-1)) #Compute q predictions using obs_t, actions_t
-    with torch.no_grad(): # Compute q targets using reward + target_qf for next_obs_t and new actions sampled from the policy
+    # Hint: Step 1: Compute q predictions using qf(torch.cat([obs_t, actions_t], dim=-1))
+    # Hint: Step 2: Compute q targets using reward + target_qf(torch.cat([next_obs_t, next_action_t], dim=-1))
+    # Hint: Step 3: Compute Bellman error as mean squared error between q_predictions and q_targets
+    # Step 1: Sample differentiable actions from π(s) via reparameterisation
+    a_sampled_t, _, _ = policy(obs_t)
+    #print_shape("a_sampled_t", a_sampled_t)
+    #q_input_dim_neg1 = torch.cat([obs_t, a_sampled_t], dim=-1)
+    #q_input_dim_1 = torch.cat([obs_t, a_sampled_t], dim=1)
+
+    #print_shape("torch.cat([obs_t, a_sampled_t], dim=-1)", q_input_dim_neg1)
+    #print_shape("torch.cat([obs_t, a_sampled_t], dim=1)", q_input_dim_1)
+
+    # Step 2: Score them with the current Q-function
+    q_pi = qf(torch.cat([obs_t, a_sampled_t], dim=1))
+    # Step 3: Maximise Q  →  minimise its negation
+    policy_loss = -q_pi.mean()
+    q_input_actual = torch.cat([obs_t, actions_t], dim=1)
+
+    #print_shape("torch.cat([obs_t, actions_t], dim=-1)", q_input_actual)
+
+    q_predictions = qf(q_input_actual)
+    # QF loss:
+    # Step 1: Q-predictions for (s, a) pairs stored in the replay buffer
+    #q_predictions = qf(torch.cat([obs_t, actions_t], dim=-1))
+    # Step 2: Bellman targets — no gradients should flow through here
+    with torch.no_grad():
         next_a_t, _, _ = policy(next_obs_t)
-        target_q_values = target_qf(torch.cat([next_obs_t, next_a_t], dim=-1))
-        q_target = rewards_t + not_dones_t * discount * target_q_values
-    qf_loss = torch.nn.functional.mse_loss(q_pred, q_target) # Compute Bellman error as mean squared error between q_predictions and q_targets
+        #print_shape("next_a_t", next_a_t)
+
+        next_q_input_dim_neg1 = torch.cat([next_obs_t, next_a_t], dim=1)
+        #next_q_input_dim_1 = torch.cat([next_obs_t, next_a_t], dim=1)
+
+        #print_shape("torch.cat([next_obs_t, next_a_t], dim=-1)", next_q_input_dim_neg1)
+        #print_shape("torch.cat([next_obs_t, next_a_t], dim=1)", next_q_input_dim_1)
+
+        q_next = target_qf(next_q_input_dim_neg1)
+        q_targets = rewards_t + not_dones_t * discount * q_next
+
+    #print_shape("q_predictions", q_predictions)
+    #print_shape("q_targets", q_targets)
+
+    #q_next = target_qf(torch.cat([next_obs_t, next_a_t], dim=-1))
+    #q_targets = rewards_t + not_dones_t * discount * q_next
+    # Step 3: MSE Bellman error
+    qf_loss = F.mse_loss(q_predictions, q_targets)  # to use .view(-1) or not
 
     # TODO END
 
@@ -90,11 +156,11 @@ def simulate_policy_ac(
         episode_length: int = 100,
         num_epochs: int = 200,
         batch_size=32,
-        target_weight= 5e-3,
+        target_weight=5e-3,
         num_update_steps=100,
-        render = False,
+        render=False,
         print_freq=10,
-        learning_rate = 3e-4,
+        learning_rate=3e-4,
 ):
     env.reset()
 
@@ -109,7 +175,8 @@ def simulate_policy_ac(
 
         # Sampling trajectories
         for it in range(batch_size):
-            sample_traj = collect_trajs(env, policy, replay_buffer, device, episode_length=episode_length, render=render)
+            sample_traj = collect_trajs(env, policy, replay_buffer, device, episode_length=episode_length,
+                                        render=render)
             sample_trajs.append(sample_traj)
 
         if iter_num % print_freq == 0:
@@ -130,6 +197,5 @@ def simulate_policy_ac(
             qf_optimizer.zero_grad()
             qf_loss.backward()
             qf_optimizer.step()
-
 
             soft_update_target(qf, target_qf, target_weight)

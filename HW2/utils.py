@@ -34,7 +34,7 @@ class PGPolicy(nn.Module):
 
     def dist_create(self, logits):
         min_log_std = -5                                                    ######################################################
-        max_log_std = 5                                                     ######################################################                                    
+        max_log_std = 5                                                     ######################################################
         loc, scale = torch.split(logits, logits.shape[-1] // 2, dim=-1)
         loc = torch.tanh(loc)
 
@@ -80,7 +80,8 @@ class ACPolicy(nn.Module):
     def dist_sample_no_postprocess(self, mu, std):
         # TODO START
         # Hint: perform the reparameterization trick - action = mean + epsilon*std, where epsilon \sim N(0, I)
-        epsilon = 0.001 #torch.randn_like(mu)
+        epsilon = torch.randn_like(std)
+        # epsilon = torch.rand_like(std).to(device) std or mu
         action = mu + epsilon * std # start with the policy’s mean action mu, then add random noise scaled by std.
         # This will allow policy updates through gradient based updates via pathwise derivatives
         # TODO END
