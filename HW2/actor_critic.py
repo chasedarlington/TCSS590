@@ -52,8 +52,8 @@ class ReplayBuffer(object):
 
 
 def compute_losses(policy, qf, target_qf, obs_t, actions_t, rewards_t, next_obs_t, not_dones_t, device, discount=0.99):
-    policy_loss = torch.Tensor(np.array([0])).to(device)
-    qf_loss = torch.Tensor(np.array([0])).to(device)
+    #policy_loss = torch.Tensor(np.array([0])).to(device)
+    #qf_loss = torch.Tensor(np.array([0])).to(device)
 
 
     obs_t = torch.as_tensor(obs_t, device=device).float()
@@ -67,13 +67,22 @@ def compute_losses(policy, qf, target_qf, obs_t, actions_t, rewards_t, next_obs_
 
     # Policy loss: 
     # Hint: Step 1: Get (differentiable) action samples a_sampled_t from the policy using policy.forward
+    a_sampled_t, _, _ = policy(obs_t)
     # Hint: Step 2: Compute the Q values as qf(obs_t, a_sampled_t)
+    policy_q = qf(torch.cat([obs_t, a_sampled_t], dim=-1))
     # Hint: Step 3: Policy loss is the mean over negative Q values
+    policy_loss = -policy_q.mean()
 
     # QF loss: 
     # Hint: Step 1: Compute q predictions using obs_t, actions_t
+    q_pred = qf(torch.cat([obs_t, actions_t], dim=-1))
     # Hint: Step 2: Compute q targets using reward + target_qf for next_obs_t and new actions sampled from the policy
-    # Hint: Step 3: Compute Bellman error as mean squared error between q_predictions and q_targets
+    with torch.no_grad():
+        next_a_t, _, _ = policy(next_obs_t)
+        target_q_values = target_qf(torch.cat([next_obs_t, next_a_t], dim=-1))
+        q_target = rewards_t + not_dones_t * discount * target_q_values
+        # Hint: Step 3: Compute Bellman error as mean squared error between q_predictions and q_targets
+    qf_loss = torch.nn.functional.mse_loss(q_pred, q_target)
 
     # TODO END
 

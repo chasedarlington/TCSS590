@@ -11,7 +11,10 @@ from torch import distributions as pyd
 import torch.optim as optim
 from torch.distributions import Categorical
 
-#device = torch.device("cpu")    # torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+#from HW1.policy import epsilon
+
+
+epsilon = 0.001
 
 def log_density(x, mu, std, logstd):
     var = std.pow(2)
@@ -80,9 +83,11 @@ class ACPolicy(nn.Module):
         return loc, std, log_std
 
     def dist_sample_no_postprocess(self, mu, std):
-        action = torch.zeros((mu.shape[0], 1)).to(device=mu.device)
+        # action = torch.zeros((mu.shape[0], 1)).to(device=mu.device)
         # TODO START
         # Hint: perform the reparameterization trick - action = mean + epsilon*std, where epsilon \sim N(0, I)
+        epsilon = torch.randn_like(mu)
+        action = mu + epsilon * std
         # This will allow policy updates through gradient based updates via pathwise derivatives
         # TODO END
         return action
@@ -135,12 +140,22 @@ def collect_trajs(
     while path_length < episode_length:
         o_for_agent = o
 
-        action, _, _ = agent(torch.Tensor(o_for_agent).unsqueeze(0).to(device))
-        action= action.cpu().detach().numpy()[0]
+        ## for numpy arrays:
+        # action, _, _ = agent(torch.Tensor(o_for_agent).unsqueeze(0).to(device))
+        # action= action.cpu().detach().numpy()[0]
         # action = np.clip(action, env.action_space.low, env.action_space.high)                                                     ######################################################
 
+        ## for tensors:
+        action, _, _ = agent(torch.Tensor(o_for_agent).unsqueeze(0).to(device))
+        action = action.cpu().detach().numpy()[0]
+
+        #with torch.no_grad():
+        #    obs_tensor = torch.as_tensor(o_for_agent,dtype=torch.float32,device=device).unsqueeze(0)
+        #    action, _, _ = agent(obs_tensor)
+        #action = action.cpu().numpy()[0]
+
         # Step the simulation forward
-        next_o, r, done, truncated, env_info = env.step(copy.deepcopy(action)) # (+truncated) UPDATED TO REFLECT NEW GYM API
+        next_o, r, done, truncated, env_info = env.step(action) #copy.deepcopy(action)) # (+truncated) UPDATED TO REFLECT NEW GYM API; removing deepcopy()
 
         replay_buffer.add(o,
                           action,
@@ -208,6 +223,7 @@ def rollout(
         episode_length=math.inf,
         render=False,
 ):
+
     # Collect the following data
     raw_obs = []
     raw_next_obs = []
@@ -222,17 +238,23 @@ def rollout(
     path_length = 0
 
     o, info = env.reset() # (+info) UPDATED TO REFLECT NEW GYM API
+
     if render:
         env.render()
 
     while path_length < episode_length:
         o_for_agent = o # UPDATED TO REFLECT NEW GYM API
 
+        #with torch.no_grad():
+        #    obs_tensor = torch.as_tensor(o_for_agent,dtype=torch.float32,device=device).unsqueeze(0)
+        #    action, _, _ = agent(obs_tensor)
+        #action = action.cpu().numpy()[0]
+
         action, _, _ = agent(torch.Tensor(o_for_agent).unsqueeze(0).to(device))
         action = action.cpu().detach().numpy()[0]
 
         # Step the simulation forward
-        next_o, r, done, truncated, env_info = env.step(copy.deepcopy(action)) # (+truncated) UPDATED TO REFLECT NEW GYM API
+        next_o, r, done, truncated, env_info = env.step(action) # (+truncated) UPDATED TO REFLECT NEW GYM API
 
         # Render the environment
         if render:

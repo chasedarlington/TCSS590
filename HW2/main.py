@@ -2,8 +2,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 import argparse
-# from policy_gradient import simulate_policy_pg
-from policy_gradient_no_comments import simulate_policy_pg
+from policy_gradient import simulate_policy_pg
 from actor_critic import simulate_policy_ac, ReplayBuffer
 from utils import ACPolicy, QF, TargetQF, PGPolicy, PGBaseline
 from evaluate import evaluate
@@ -65,12 +64,12 @@ if __name__ == '__main__':
                               hidden_depth=hidden_depth_baseline).to(device)
 
         # HYPERPARAMETERS
-        num_epochs=200
-        max_path_length=200
-        batch_size=100
+        num_epochs=200#200
+        max_path_length=200 #200
+        batch_size=100#100
         gamma=0.99
-        baseline_train_batch_size=64
-        baseline_num_epochs=5
+        baseline_train_batch_size=64 #256 #64
+        baseline_num_epochs=2 #5
         print_freq=10
         eval_ep_count=100
 

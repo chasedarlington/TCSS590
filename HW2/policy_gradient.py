@@ -3,6 +3,7 @@ import numpy as np
 from torch import nn
 from torch import optim
 from utils import rollout, log_density
+from test_shapes import assert_same_shapes
 
 # WHERE SHALL WE USE THIS? with torch.no_grad():
 #       means: do not build computation graph... we are not using .backward() within
@@ -33,7 +34,7 @@ def train_model(
     #### FLATTEN TRAJECTORIES INTO STATES, ACTIONS, REWARDS, RETURNS (TO GO) !!!!
 
     for traj in trajectories:
-        states_traj = traj['states'] # STATES !
+        states_traj = traj['observations'] # STATES !
         actions_traj = traj['actions'] # ACTIONS !
         rewards_traj = traj['rewards'] # REWARDS !
         returns_traj = np.zeros_like(rewards_traj) # DISCOUNTED RETURNS (TO GO) !
@@ -53,7 +54,6 @@ def train_model(
             returns_traj[t] = running_return # returns_traj[t] is the running return (return to go) from time step t
 
         states_all.append(states_traj) # append states
-        states_all.append(states_traj) # append states
         actions_all.append(actions_traj) # append actions
         returns_all.append(returns_traj) # append discounted returns
         # log_probs_all.append(log_probs_traj) # append log probabilities of actions under the policy
@@ -65,14 +65,18 @@ def train_model(
     # returns = (returns - returns.mean()) / (returns.std() + 1e-8)  # normalize returns (zero mean, unit variance)
     # log_probs = np.concatenate(log_probs_all) # concatenate all log probabilities of actions under the policy (into one NumPy array)
 
+
+    # assert_same_shapes("states_all", states_all)
+
     ## for PyTorch tensors...
-    states = torch.tensor(states_all, dtype=torch.float32, device=device).to(device) # join all states
-    actions = torch.tensor(actions_all, dtype=torch.float32, device=device).to(device) # join all actions
-    returns = torch.tensor(returns_all, dtype=torch.float32, device=device).to(device) # join all returns
+    states = np.concatenate(states_all, axis=0)
+    actions = np.concatenate(actions_all, axis=0)
+    returns = np.concatenate(returns_all, axis=0)
+    states = torch.tensor(states, dtype=torch.float32, device=device) # join all states
+    actions = torch.tensor(actions, dtype=torch.float32, device=device) # join all actions
+    returns = torch.tensor(returns, dtype=torch.float32, device=device) # join all returns
 
-    # ????????????????
-
-    # returns = torch.nn.functional.mse_loss(returns, returns.mean()) # normalize returns (zero mean, unit variance)
+    returns = (returns - returns.mean()) / (returns.std() + 1e-8) # normalize returns (zero mean, unit variance)
 
     # returns = returns.view(-1, 1) # ensure returns are shaped like baseline output
 
@@ -86,34 +90,34 @@ def train_model(
 
     ## if states is a NumPy array:
     # num_samples = len(states)
-    # indices = np.arange(num_samples)
+    # idx_arr = np.arange(num_samples)
 
     ## if states is a PyTorch tensor:
     num_samples = states.shape[0]
 
     ### SHUFFLE & SAMPLE STATES; PASS TO BASELINE NEURAL NET; COMPARE BASELINE NEURAL NET PREDICTIONS TO REAL RETURNS !!!
+    ## note: num_samples ~ number of rows (samples) in "states"
 
-    for _ in range(baseline_num_epochs): # baseline iterations ~ num of baselines (i.e. max training iterations per baseline)
+    for epoch in range(baseline_num_epochs): # baseline iterations ~ num of baselines (i.e. max training iterations per baseline)
 
         ## SHUFFLE INDICES FOR SAMPLING !!
 
         ## if states is a numpy array:
-        # np.random.shuffle(indices) # shuffle indices
+        # np.random.shuffle(idx_arr) # shuffle index array
 
         ## if states is a tensor:
-        indices = torch.randperm(num_samples, device=device) # shuffle indices
-
-        for i in range(num_samples // baseline_train_batch_size): # iterations per baseline ~ num of samples per baseline (i.e. max path length per training iteration)
+        idx_arr = torch.randperm(num_samples, device=device) # shuffle index array; torch.randperm(5) returns rand permutation of [0, 1, 2, 3, 4]
+        for i in range(num_samples // baseline_train_batch_size): # “How many full batches can I make from the total number of samples?”
 
             ## SAMPLE ON INDICES !!
 
             ## if states & actions are numpy arrays:
-            # batch_indices = torch.LongTensor(indices[i : i + baseline_train_batch_size]).to(device) # get shuffled indices for batch;  convert/send to device
+            # batch_indices = torch.LongTensor(idx_arr[(i) * baseline_train_batch_size : (i+1) * baseline_train_batch_size]).to(device) # get indices for current batch (from shuffled indices);  convert/send to device
             # batch_states = torch.from_numpy(states[batch_indices.cpu()]).float().to(device) # get shuffled states; convert/send to device
             # batch_returns = torch.from_numpy(returns[batch_indices.cpu()]).float().to(device) # get shuffled returns; convert/send to device
 
             ## if states & actions are tensors:
-            batch_indices = indices[i : i + baseline_train_batch_size] # get shuffled indices for batch
+            batch_indices = idx_arr[(i) * baseline_train_batch_size : (i+1) * baseline_train_batch_size] # get indices for current batch (from shuffled indices)
             batch_states = states[batch_indices] # get shuffled states
             batch_returns = returns[batch_indices] # get shuffled returns
 
@@ -128,9 +132,9 @@ def train_model(
 
             ## UPDATE BASELINE !!
 
-            baseline_optim.zero_grad()
-            baseline_loss.backward()
-            baseline_optim.step()
+            baseline_optim.zero_grad() # reset gradients to zero
+            baseline_loss.backward() # compute new gradients from current loss
+            baseline_optim.step() # update model weights using those ^ gradients
 
 # ---------[TRAIN POLICY]-----------------------------------------------------------------------------------------
 
@@ -157,19 +161,23 @@ def train_model(
     ### COMPUTE FINAL BASELINE RETURNS; COMPARE POLICY RETURNS !!!
     ## >> returns: "how good was the outcome from those states?"
     ## >> baseline(states): "how good did the baseline expect those states to be?”
+    ## >> .detach(): do not build a gradient path, i.e. do not include in computation graph
+    #           (otherwise, policy_loss.backward() will compute gradients for baseline network weights)
 
-    advantages = returns - baseline(states) # "was the actual result better or worse than expected?"
+    with torch.no_grad(): # force torch to not build computation graph (alternative to .detach())
+        baseline_results = baseline(states)
+    advantages = returns - baseline_results # "was the actual result better or worse than expected?"
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # normalize advantages
 
     ### COMPUTE LOSS (OUR SURROGATE OBJECTIVE) W/ POLICY LOG * ADVANTAGE !!
-    ##
 
     policy_loss = -(policy_log * advantages).mean()
 
     ## UPDATE POLICY: step towards less  !!!
 
-    policy_optim.zero_grad()
-    policy_loss.backward()
-    policy_optim.step()
+    policy_optim.zero_grad() # reset gradients to zero
+    policy_loss.backward() # compute new gradients from current loss
+    policy_optim.step() # update model weights using those ^ gradients
 
     ### OPTIONAL: DELETE VARIABLES TO FREE UP MEMORY !!!
 
