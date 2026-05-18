@@ -11,11 +11,6 @@ from torch import distributions as pyd
 import torch.optim as optim
 from torch.distributions import Categorical
 
-#from HW1.policy import epsilon
-
-
-epsilon = 0.001
-
 def log_density(x, mu, std, logstd):
     var = std.pow(2)
     log_density = -(x - mu).pow(2) / (2 * var) \
@@ -83,11 +78,10 @@ class ACPolicy(nn.Module):
         return loc, std, log_std
 
     def dist_sample_no_postprocess(self, mu, std):
-        # action = torch.zeros((mu.shape[0], 1)).to(device=mu.device)
         # TODO START
         # Hint: perform the reparameterization trick - action = mean + epsilon*std, where epsilon \sim N(0, I)
-        epsilon = torch.randn_like(mu)
-        action = mu + epsilon * std
+        epsilon = 0.001 #torch.randn_like(mu)
+        action = mu + epsilon * std # start with the policy’s mean action mu, then add random noise scaled by std.
         # This will allow policy updates through gradient based updates via pathwise derivatives
         # TODO END
         return action
