@@ -50,7 +50,7 @@ def parse_eval_lines(stdout: str):
         test 99, success False, reward -13.7725877272614
 
     Returns:
-        rewards: list[float]
+        reward_arr: list[float]
         successes: list[bool]
     """
     pattern = re.compile(

@@ -3,10 +3,6 @@ import numpy as np
 from torch import nn
 from torch import optim
 from utils import rollout, log_density
-from test_shapes import assert_same_shapes
-
-# WHERE SHALL WE USE THIS? with torch.no_grad():
-#       means: do not build computation graph... we are not using .backward() within
 
 """
 Train one policy-gradient update using collected trajectory data.
@@ -34,9 +30,9 @@ def train_model(
     #### FLATTEN TRAJECTORIES INTO STATES, ACTIONS, REWARDS, RETURNS (TO GO) !!!!
 
     for traj in trajectories:
-        states_traj = traj['observations'] # STATES !
-        actions_traj = traj['actions'] # ACTIONS !
-        rewards_traj = traj['rewards'] # REWARDS !
+        states_traj = traj['state_arr'] # STATES !
+        actions_traj = traj['action_arr'] # ACTIONS !
+        rewards_traj = traj['reward_arr'] # REWARDS !
         returns_traj = np.zeros_like(rewards_traj) # DISCOUNTED RETURNS (TO GO) !
         # log_probs_traj = traj['log_probs'] # LOG PROBABILITIES OF ACTIONS UNDER THE POLICY !
 
@@ -54,30 +50,27 @@ def train_model(
             returns_traj[t] = running_return # returns_traj[t] is the running return (return to go) from time step t
 
         states_all.append(states_traj) # append states
-        actions_all.append(actions_traj) # append actions
+        actions_all.append(actions_traj) # append action_arr
         returns_all.append(returns_traj) # append discounted returns
-        # log_probs_all.append(log_probs_traj) # append log probabilities of actions under the policy
+        # log_probs_all.append(log_probs_traj) # append log probabilities of action_arr under the policy
 
     ## for NumPy arrays...
     # states = np.concatenate(states_all) # concatenate all states (into one NumPy array)
-    # actions = np.concatenate(actions_all) # concatenate all actions (into one NumPy array)
+    # action_arr = np.concatenate(actions_all) # concatenate all action_arr (into one NumPy array)
     # returns = np.concatenate(returns_all) # concatenate all discounted returns (into one NumPy array)
     # returns = (returns - returns.mean()) / (returns.std() + 1e-8)  # normalize returns (zero mean, unit variance)
-    # log_probs = np.concatenate(log_probs_all) # concatenate all log probabilities of actions under the policy (into one NumPy array)
-
-
-    # assert_same_shapes("states_all", states_all)
+    # log_probs = np.concatenate(log_probs_all) # concatenate all log probabilities of action_arr under the policy (into one NumPy array)
 
     ## for PyTorch tensors...
     states = np.concatenate(states_all, axis=0)
     actions = np.concatenate(actions_all, axis=0)
     returns = np.concatenate(returns_all, axis=0)
     states = torch.tensor(states, dtype=torch.float32, device=device) # join all states
-    actions = torch.tensor(actions, dtype=torch.float32, device=device) # join all actions
+    actions = torch.tensor(actions, dtype=torch.float32, device=device) # join all action_arr
     returns = torch.tensor(returns, dtype=torch.float32, device=device) # join all returns
 
     returns = (returns - returns.mean()) / (returns.std() + 1e-8) # normalize returns (zero mean, unit variance)
-
+    # COME BACK HERE
     # returns = returns.view(-1, 1) # ensure returns are shaped like baseline output
 
     # log_probs = torch.stack(log_probs_all).to(device) # join log probabilities
@@ -111,12 +104,12 @@ def train_model(
 
             ## SAMPLE ON INDICES !!
 
-            ## if states & actions are numpy arrays:
+            ## if states & action_arr are numpy arrays:
             # batch_indices = torch.LongTensor(idx_arr[(i) * baseline_train_batch_size : (i+1) * baseline_train_batch_size]).to(device) # get indices for current batch (from shuffled indices);  convert/send to device
             # batch_states = torch.from_numpy(states[batch_indices.cpu()]).float().to(device) # get shuffled states; convert/send to device
             # batch_returns = torch.from_numpy(returns[batch_indices.cpu()]).float().to(device) # get shuffled returns; convert/send to device
 
-            ## if states & actions are tensors:
+            ## if states & action_arr are tensors:
             batch_indices = idx_arr[(i) * baseline_train_batch_size : (i+1) * baseline_train_batch_size] # get indices for current batch (from shuffled indices)
             batch_states = states[batch_indices] # get shuffled states
             batch_returns = returns[batch_indices] # get shuffled returns
@@ -142,19 +135,19 @@ def train_model(
 
     """
     Pass states through the policy neural network to compute the current Gaussian policy distribution: mu, std, and log_std; ignore the newly sampled action (_). 
-    Then log_density computes the log probability of the previously collected rollout actions under that distribution. 
+    Then log_density computes the log probability of the previously collected rollout action_arr under that distribution. 
     That log probability is used in the policy-gradient objective so PyTorch can backpropagate into the policy network.
     """
 
     ### CALCULATE POLICY LOG DISTRIBUTION PARAMETERS USING LOG_DENSITY FXN !!!
     ## >> policy(states): "how good did the current policy expect those states to be?"
-    ## >> policy_log: "how likely did the current policy think those taken actions were?”
+    ## >> policy_log: "how likely did the current policy think those taken action_arr were?”
 
-    ## if states & actions are numpy arrays:
+    ## if states & action_arr are numpy arrays:
     # _, std, log_std = policy(torch.from_numpy(states).float().to(device))
-    # policy_log = log_density(torch.from_numpy(actions).float().to(device), policy.mu, std, log_std)
+    # policy_log = log_density(torch.from_numpy(action_arr).float().to(device), policy.mu, std, log_std)
 
-    ## if states & actions are tensors:
+    ## if states & action_arr are tensors:
     _, std, log_std = policy(states)
     policy_log = log_density(actions, policy.mu, std, log_std)
 
@@ -167,7 +160,8 @@ def train_model(
     with torch.no_grad(): # force torch to not build computation graph (alternative to .detach())
         baseline_results = baseline(states)
     advantages = returns - baseline_results # "was the actual result better or worse than expected?"
-    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # normalize advantages
+    #advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # normalize advantages
+    # COME BACK HERE
 
     ### COMPUTE LOSS (OUR SURROGATE OBJECTIVE) W/ POLICY LOG * ADVANTAGE !!
 
@@ -189,18 +183,38 @@ def simulate_policy_pg(env, policy, baseline, num_epochs=200, max_path_length=20
     policy_optim = optim.Adam(policy.parameters())
     baseline_optim = optim.Adam(baseline.parameters())
 
+    history = {
+        "episode": [],
+        "avg_reward": [],
+        "max_path_length": [],
+        "policy_loss": [],
+        "qf_loss": [],
+    }
+
     for iter_num in range(num_epochs):
         sample_trajs = []
         for _ in range(batch_size):
             sample_traj = rollout(env,policy,device,episode_length=max_path_length)
             sample_trajs.append(sample_traj)
 
-        # Logging returns occasionally
+        #if len(sample_trajs) > 0:
+        epoch_avg_reward = np.mean(np.asarray([traj['reward_arr'].sum() for traj in sample_trajs]))
+        epoch_max_path_len = np.max(np.asarray([traj['reward_arr'].shape[0] for traj in sample_trajs]))
+
+        history["episode"].append(iter_num)
+        history["avg_reward"].append(epoch_avg_reward)
+        history["max_path_length"].append(epoch_max_path_len)
+
         if iter_num % print_freq == 0:
-            rewards_np = np.mean(np.asarray([traj['rewards'].sum() for traj in sample_trajs]))
-            path_length = np.max(np.asarray([traj['rewards'].shape[0] for traj in sample_trajs]))
-            print("Episode: {}, reward: {}, max path length: {}".format(iter_num, rewards_np, path_length))
+            print("Episode: {}, reward: {}, max path length: {}".format(iter_num,epoch_avg_reward,epoch_max_path_len,))
+
+        # Logging returns occasionally
+        #if iter_num % print_freq == 0:
+        #    epoch_avg_reward = np.mean(np.asarray([traj['return'].sum() for traj in sample_trajs]))
+        #    epoch_max_path_len = np.max(np.asarray([traj['reward_arr'].shape[0] for traj in sample_trajs]))
+        #    print("Episode: {}, reward: {}, max path length: {}".format(iter_num, epoch_avg_reward, epoch_max_path_len))
 
         # Training model
         train_model(policy, baseline, sample_trajs, policy_optim, baseline_optim, device, gamma=gamma,
                     baseline_train_batch_size=baseline_train_batch_size, baseline_num_epochs=baseline_num_epochs)
+    return history

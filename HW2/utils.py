@@ -121,8 +121,8 @@ def collect_trajs(
     # Collect the following data
     raw_obs = []
     raw_next_obs = []
-    actions = []
-    rewards = []
+    action_arr = []
+    reward_arr = []
     dones = []
     images = []
 
@@ -164,8 +164,8 @@ def collect_trajs(
 
         raw_obs.append(o)
         raw_next_obs.append(next_o)
-        actions.append(action)
-        rewards.append(r)
+        action_arr.append(action)
+        reward_arr.append(r)
         dones.append(done)
         path_length += 1
         if done:
@@ -175,20 +175,20 @@ def collect_trajs(
     # Prepare the items to be returned
     observations = np.array(raw_obs)
     next_observations = np.array(raw_next_obs)
-    actions = np.array(actions)
-    if len(actions.shape) == 1:
-        actions = np.expand_dims(actions, 1)
-    rewards = np.array(rewards)
-    if len(rewards.shape) == 1:
-        rewards = rewards.reshape(-1, 1)
+    action_arr = np.array(action_arr)
+    if len(action_arr.shape) == 1:
+        action_arr = np.expand_dims(action_arr, 1)
+    reward_arr = np.array(reward_arr)
+    if len(reward_arr.shape) == 1:
+        reward_arr = reward_arr.reshape(-1, 1)
     dones = np.array(dones).reshape(-1, 1)
 
     # Return in the following format
     return dict(
         observations=observations,
         next_observations=next_observations,
-        actions=actions,
-        rewards=rewards,
+        actions=action_arr,
+        rewards=reward_arr,
         dones=np.array(dones).reshape(-1, 1),
         images=np.array(images)
     )
@@ -278,10 +278,10 @@ def rollout(
 
     # Return in the following format
     return dict(
-        observations=observations,
-        next_observations=next_observations,
-        actions=actions,
-        rewards=rewards,
-        dones=np.array(dones).reshape(-1, 1),
+        state_arr=observations,
+        next_state_arr=next_observations,
+        action_arr=actions,
+        reward_arr=rewards,
+        done_arr=np.array(dones).reshape(-1, 1),
         images=np.array(images)
     )

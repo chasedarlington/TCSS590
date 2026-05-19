@@ -19,13 +19,13 @@ def evaluate(env, policy, device,num_validation_runs, episode_length, render):
                 device,
                 episode_length=episode_length,
                 render=render)
-        success = len(path['dones']) == episode_length
+        success = len(path['done_arr']) == episode_length
 
         if success:
             success_count += 1
-            rewards_suc += np.sum(path['rewards'])
-        rewards_all += np.sum(path['rewards'])
-        print(f"test {k}, success {success}, reward {np.sum(path['rewards'])}")
+            rewards_suc += np.sum(path['reward_arr'])
+        rewards_all += np.sum(path['reward_arr'])
+        print(f"test {k}, success {success}, reward {np.sum(path['reward_arr'])}")
     print("Success rate: ", success_count/num_validation_runs)
     print("Average reward (success only): ", rewards_suc/max(success_count, 1))
     print("Average reward (all): ", rewards_all/num_validation_runs)

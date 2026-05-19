@@ -7,7 +7,7 @@ from actor_critic import simulate_policy_ac, ReplayBuffer
 from utils import ACPolicy, QF, TargetQF, PGPolicy, PGBaseline
 from evaluate import evaluate
 import random
-import sys
+import matplotlib.pyplot as plt
 
 # OVERRIDING GPU USE BECAUSE THE CURRENT PG IMPLEMENTATION IS MORE SEQUENTIAL
 # environment and NumPy work stay on CPU
@@ -35,12 +35,13 @@ if __name__ == '__main__':
     parser.add_argument('--test', action='store_true', default=False)
     parser.add_argument('--render',  action='store_true', default=False)
     parser.add_argument('--double_q', action='store_true', default=False)
+    parser.add_argument('--plot', type=str)
     args = parser.parse_args()
     if args.render:
         import os
         os.environ["LD_PRELOAD"] = "/usr/lib/x86_64-linux-gnu/libGLEW.so"
 
-    env = gym.make("InvertedPendulum-v5", render_mode="human" if args.render else None) # trying v5 instead of v2
+    env = gym.make("InvertedPendulum-v4", render_mode="human" if args.render else None) # trying v5 instead of v2
 
     if args.task == 'policy_gradient':
 
@@ -64,12 +65,12 @@ if __name__ == '__main__':
                               hidden_depth=hidden_depth_baseline).to(device)
 
         # HYPERPARAMETERS
-        num_epochs=200#200
-        max_path_length=200 #200
-        batch_size=100#100
+        num_epochs=200
+        max_path_length=200
+        batch_size=100
         gamma=0.99
-        baseline_train_batch_size=64 #256 #64
-        baseline_num_epochs=2 #5
+        baseline_train_batch_size=64
+        baseline_num_epochs=5
         print_freq=10
         eval_ep_count=100
 
@@ -78,7 +79,7 @@ if __name__ == '__main__':
         if not args.test:
             
             # SIMULATE: run the policy gradient training loop; update policy + baseline
-            simulate_policy_pg(env, policy, baseline, num_epochs=num_epochs, max_path_length=max_path_length, 
+            history = simulate_policy_pg(env, policy, baseline, num_epochs=num_epochs, max_path_length=max_path_length,
                             batch_size=batch_size, gamma=gamma, baseline_train_batch_size=baseline_train_batch_size, 
                             device=device, baseline_num_epochs=baseline_num_epochs, print_freq=print_freq, render=args.render)
             
@@ -97,7 +98,7 @@ if __name__ == '__main__':
         # REPLAY BUFFER
         obs_size = env.observation_space.shape[0]
         ac_size = env.action_space.shape[0]
-        capacity=50000 # 10000
+        capacity=10000
         replay_buffer = ReplayBuffer(obs_size, ac_size, capacity, device)
 
         # NEURAL NET ARCHITECTURE (POLICY)
@@ -126,7 +127,7 @@ if __name__ == '__main__':
             target_qf = TargetQF(env.observation_space.shape[-1] + env.action_space.shape[-1], hidden_dim=hidden_dim, hidden_depth=hidden_depth).to(device)
             
             # SIMULATE: run the actor-critic training loop; update policy + Q-networks, and use replay buffer to store experience 
-            simulate_policy_ac(env, policy, qf, target_qf, replay_buffer, device,
+            history = simulate_policy_ac(env, policy, qf, target_qf, replay_buffer, device,
                                episode_length=max_path_length, num_epochs=num_epochs, 
                                batch_size=batch_size, num_update_steps=num_update_steps,
                                print_freq=print_freq, render=args.render)
@@ -140,4 +141,32 @@ if __name__ == '__main__':
 
         # EVALUATE: Run the policy in the environment x times, for up to max_path_length steps each time, optionally render the environment
         evaluate(env,policy,device,num_validation_runs=eval_ep_count,episode_length=ep_length,render=args.render)
-        
+
+    if args.plot:
+        plt.figure()
+        plt.plot(history["episode"], history["avg_reward"])
+        plt.xlabel("Episode")
+        plt.ylabel("Average Reward")
+        plt.title("Actor-Critic Learning Curve")
+        plt.grid(True)
+        plt.show()
+
+        plt.figure()
+        plt.plot(history["episode"], history["max_path_length"])
+        plt.xlabel("Episode")
+        plt.ylabel("Max Path Length")
+        plt.title("Max Path Length During Training")
+        plt.grid(True)
+        plt.show()
+
+        plt.figure()
+        plt.plot(history["episode"], history["policy_loss"], label="Policy Loss")
+        plt.plot(history["episode"], history["qf_loss"], label="QF Loss")
+        plt.xlabel("Episode")
+        plt.ylabel("Loss")
+        plt.title("Actor and Critic Loss")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+
