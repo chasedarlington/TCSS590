@@ -71,8 +71,8 @@ if __name__ == '__main__':
         gamma=0.99
         baseline_train_batch_size=64
         baseline_num_epochs=5
-        print_freq=10
         eval_ep_count=100
+        print_freq = 10
 
         # TRAIN: run policy in env, train/update policy, and use baseline netowrk for stability
         #   then save trained policy weights (in .pth file)
@@ -98,7 +98,7 @@ if __name__ == '__main__':
         # REPLAY BUFFER
         obs_size = env.observation_space.shape[0]
         ac_size = env.action_space.shape[0]
-        capacity=10000
+        capacity = 10000
         replay_buffer = ReplayBuffer(obs_size, ac_size, capacity, device)
 
         # NEURAL NET ARCHITECTURE (POLICY)
@@ -111,9 +111,10 @@ if __name__ == '__main__':
         num_epochs = 200
         batch_size = 64
         num_update_steps = 100
+        eval_ep_count = 100
+        ep_length = 200
         print_freq = 10
-        eval_ep_count=100
-        ep_length=200
+
 
         # ACTOR CRITIC POLICY: self.trunk = mlp(num_inputs, hidden_dim, num_outputs*2, hidden_depth)
         policy = ACPolicy(env.observation_space.shape[0], env.action_space.shape[0], hidden_dim=hidden_dim, hidden_depth=hidden_depth).to(device)

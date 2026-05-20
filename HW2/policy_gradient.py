@@ -160,7 +160,7 @@ def train_model(
     with torch.no_grad(): # force torch to not build computation graph (alternative to .detach())
         baseline_results = baseline(states)
     advantages = returns - baseline_results # "was the actual result better or worse than expected?"
-    #advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # normalize advantages
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # normalize advantages
     # COME BACK HERE
 
     ### COMPUTE LOSS (OUR SURROGATE OBJECTIVE) W/ POLICY LOG * ADVANTAGE !!
