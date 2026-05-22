@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import copy
 import numpy as np
 from utils import collect_trajs
+from csv_logger import CSVLogger
+
 
 def print_shape(name, tensor):
     print(f"{name}: shape={tuple(tensor.shape)}, ndim={tensor.dim()}")
@@ -95,21 +97,30 @@ def soft_update_target(net, target_net, tau):
         target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
 def simulate_policy_ac(
-        env,
-        policy,
-        qf,
-        target_qf,
-        replay_buffer,
-        device,
-        episode_length: int = 100,
-        num_epochs: int = 200,
-        batch_size=32,
-        target_weight=5e-3,
-        num_update_steps=100,
-        render=False,
-        print_freq=10,
-        learning_rate=3e-4,
+
+        ## POLICY
+        env, # gym.make("InvertedPendulum-v4", render_mode="human" if args.render else None)
+        policy, # policy (ACPolicy) neural network
+        qf, # policy (QF) neural network
+        target_qf, # policy (targetQF) neural network
+        replay_buffer, # ReplayBuffer(obs_size, ac_size, capacity, device)
+
+        ## HYPERPARAMETERS
+        learning_rate=3e-4, # optim.Adam learning rate ~ step size for .backward() and .step()
+        num_epochs: int = 200, # number of outer iterations for training loop
+        batch_size=32, # number of rollout trajectories, and repeats per replay buffer
+        path_len_limit: int = 100, # maximum steps per rollout
+        discount=0.99, # discount factor; how much are future rewards worth right now?
+        target_weight=5e-3, # soft update rate; how quickly does target_qf move towards qf?
+        num_update_steps=100, # number of gradient update rounds per epoch; how many update rounds per epoch?
+
+        ## SYSTEM AND LOGGING
+        print_freq=10,  # print frequency
+        device="cuda",  # device (cuda or cpu)
+        render=False,  # render the gym.make env?
+        csv_path=None  # path for CSV log
 ):
+
     env.reset()
 
     policy_optimizer = optim.Adam(policy.parameters(), lr=learning_rate)
@@ -118,67 +129,104 @@ def simulate_policy_ac(
     # Copy parameters initially
     soft_update_target(qf, target_qf, 1.0)
 
-    history = {
-        "episode": [],
-        "avg_reward": [],
-        "max_path_length": [],
-        "policy_loss": [],
-        "qf_loss": [],
-    }
+    data_fields = [
+        "env",
+        "policy",
+        "episode",
+        "avg_reward",
+        "max_path_length",
+        "learning_rate",
+        "num_epochs",
+        "batch_size",
+        "path_len_limit",
+        "discount",
+        "target_weight",
+        "num_update_steps"
+    ]
 
-    for iter_num in range(num_epochs):
-        sample_trajs = []
+    csv_log = CSVLogger(csv_path, data_fields) if csv_path else None  # INITIALIZE
 
-        # Sampling trajectories
-        for _ in range(batch_size):
-            sample_traj = collect_trajs(env, policy, replay_buffer, device, episode_length=episode_length,render=render)
-            sample_trajs.append(sample_traj)
+    if csv_log:
+        csv_log = csv_log.__enter__() # ENTER: FILE OPEN
 
-        if len(sample_trajs) > 0:
-            epoch_avg_reward = np.mean(np.asarray([traj["reward_arr"].sum() for traj in sample_trajs]))
-            epoch_max_path_len = np.max(np.asarray([traj["reward_arr"].shape[0] for traj in sample_trajs]))
+    try:
 
-        epoch_policy_losses = []
-        epoch_qf_losses = []
+        ### ROLLOUT !!!
 
-        for update_num in range(num_update_steps):
-            state_arr, action_arr, reward_arr, next_state_arr, not_done_arr = replay_buffer.sample(batch_size)
+        for iter_num in range(num_epochs): # NUM EPOCHS
+            sample_trajs = []
+            for _ in range(batch_size): # NUM TRAJECTORIES
+                sample_traj = collect_trajs(env, policy, replay_buffer, device, episode_length=path_len_limit,render=render) # EQUIV TO ROLLOUT!
+                sample_trajs.append(sample_traj)
 
-            policy_loss, qf_loss = compute_losses(policy, qf, target_qf, state_arr, action_arr, reward_arr, next_state_arr,
-                                                  not_done_arr, device)
+            epoch_policy_losses = []
+            epoch_qf_losses = []
 
-            policy_optimizer.zero_grad()
-            policy_loss.backward()
-            policy_optimizer.step()
+            for update_num in range(num_update_steps):
+                state_arr, action_arr, reward_arr, next_state_arr, not_done_arr = replay_buffer.sample(batch_size)
 
-            qf_optimizer.zero_grad()
-            qf_loss.backward()
-            qf_optimizer.step()
+                policy_loss, qf_loss = compute_losses(policy, qf, target_qf, state_arr,
+                                                      action_arr, reward_arr, next_state_arr,
+                                                      not_done_arr, device, discount)
 
-            soft_update_target(qf, target_qf, target_weight)
+                policy_optimizer.zero_grad()
+                policy_loss.backward()
+                policy_optimizer.step()
 
-            epoch_policy_losses.append(policy_loss.item())
-            epoch_qf_losses.append(qf_loss.item())
+                qf_optimizer.zero_grad()
+                qf_loss.backward()
+                qf_optimizer.step()
 
-        history["episode"].append(iter_num)
-        history["avg_reward"].append(epoch_avg_reward)
-        history["max_path_length"].append(epoch_max_path_len)
-        history["policy_loss"].append(np.mean(epoch_policy_losses))
-        history["qf_loss"].append(np.mean(epoch_qf_losses))
+                soft_update_target(qf, target_qf, target_weight)
 
-        if iter_num % print_freq == 0:
-            print(
-                "Episode: {}, reward: {}, max path length: {}, policy loss: {:.4f}, qf loss: {:.4f}".format(
-                    iter_num,
-                    epoch_avg_reward,
-                    epoch_max_path_len,
-                    history["policy_loss"][-1],
-                    history["qf_loss"][-1]
+                epoch_policy_losses.append(policy_loss.item())
+                epoch_qf_losses.append(qf_loss.item())
+
+            ### LOGGING !!!
+
+            ## CALCULATIONS !!
+
+            episode_returns = np.fromiter((float(traj["reward_arr"].sum()) for traj in sample_trajs),dtype=np.float32)
+            path_lengths = np.fromiter((traj["reward_arr"].shape[0] for traj in sample_trajs), dtype=np.int32)
+            epoch_avg_reward = float(episode_returns.mean())
+            epoch_max_path_len = int(path_lengths.max())
+
+            ## PRINT !!
+
+            if iter_num % print_freq == 0:
+                print(
+                    "Episode: {}, reward: {}, max path length: {}, policy loss: {:.4f}, qf loss: {:.4f}".format(
+                        iter_num,
+                        epoch_avg_reward,
+                        epoch_max_path_len
+                    )
                 )
-            )
 
-        #if iter_num % print_freq == 0:
-        #    epoch_avg_reward = np.mean(np.asarray([traj['reward_arr'].sum() for traj in sample_trajs]))
-        #    epoch_max_path_len = np.max(np.asarray([traj['reward_arr'].shape[0] for traj in sample_trajs]))
-        #    print("Episode: {}, reward: {}, max path length: {}".format(iter_num, epoch_avg_reward, epoch_max_path_len))
-    return history
+            ## ALTERNATE PRINT !!
+
+            #if iter_num % print_freq == 0:
+            #    epoch_avg_reward = np.mean(np.asarray([traj['reward_arr'].sum() for traj in sample_trajs]))
+            #    epoch_max_path_len = np.max(np.asarray([traj['reward_arr'].shape[0] for traj in sample_trajs]))
+            #    print("Episode: {}, reward: {}, max path length: {}".format(iter_num, epoch_avg_reward, epoch_max_path_len))
+
+            ## WRITE TO LOG !!
+
+            if csv_log:
+                csv_log.write({
+                    "env": env,
+                    "policy": policy,
+                    "episode": iter_num,
+                    "avg_reward": epoch_avg_reward,
+                    "max_path_length": epoch_max_path_len,
+                    "learning_rate": learning_rate,
+                    "num_epochs": num_epochs,
+                    "batch_size": batch_size,
+                    "path_len_limit": path_len_limit,
+                    "discount": discount,
+                    "target_weight": target_weight,
+                    "num_update_steps": num_update_steps
+                })
+    finally:
+        if csv_log:
+            csv_log.__exit__(None, None, None)  # TRY AND FINALLY W/ EXIT: FILE CLOSE
+    return

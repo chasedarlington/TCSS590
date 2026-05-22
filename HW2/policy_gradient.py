@@ -1,8 +1,8 @@
 import torch
 import numpy as np
-from torch import nn
 from torch import optim
 from utils import rollout, log_density
+from csv_logger import CSVLogger
 
 """
 Train one policy-gradient update using collected trajectory data.
@@ -15,7 +15,7 @@ def train_model(
         policy_optim,
         baseline_optim,
         device,
-        gamma=0.99,
+        discount=0.99,
         baseline_train_batch_size=64,
         baseline_num_epochs=5
 ):
@@ -43,7 +43,7 @@ def train_model(
 
             ## CALCULATE RUNNING RETURN (CURRENT REWARD + GAMMA * PRIOR SUM OF REWARDS) TO GO !!
 
-            running_return = rewards_traj[t] + gamma * running_return # running_return is return to go
+            running_return = rewards_traj[t] + discount * running_return # running_return is return to go
 
             ## INJECT RUNNING RETURN (TO GO) IN RETURNS TRAJECTORY !!
 
@@ -177,44 +177,106 @@ def train_model(
 
     del states, actions, returns, states_all, actions_all, returns_all
 
-def simulate_policy_pg(env, policy, baseline, num_epochs=200, max_path_length=200, batch_size=100,
-                       gamma=0.99, baseline_train_batch_size=64, baseline_num_epochs=5, print_freq=10, device = "cuda", render=False):
+def simulate_policy_pg(
+
+        ## POLICY
+        env, # gym.make("InvertedPendulum-v4", render_mode="human" if args.render else None)
+        policy, # policy (PGPolicy) neural network
+        baseline, # policy (PGBaseline) neural network
+
+        ## HYPERPARAMETERS
+        learning_rate = 0.001, # optim.Adam learning rate ~ step size for .backward() and .step()
+        num_epochs = 200, # outer iterations; for training loop
+        batch_size = 100, # inner iterations; rollouts/trajectories per epoch
+        path_len_limit = 200, # maximum steps per rollout
+        discount = 0.99, # discount factor; how much are future rewards worth right now?
+        baseline_train_batch_size = 64, # number of rollout trajectories per epoch
+        baseline_num_epochs = 5, # epochs for baseline
+
+        ## SYSTEM & LOGGING
+        print_freq = 10, # print frequency
+        device = "cuda", # device (cuda or cpu)
+        render = False, # render the gym.make env?
+        csv_path = None # path for CSV log
+):
     
-    policy_optim = optim.Adam(policy.parameters())
-    baseline_optim = optim.Adam(baseline.parameters())
+    policy_optim = optim.Adam(policy.parameters(),lr=learning_rate)
+    baseline_optim = optim.Adam(baseline.parameters(),lr=learning_rate)
 
-    history = {
-        "episode": [],
-        "avg_reward": [],
-        "max_path_length": [],
-        "policy_loss": [],
-        "qf_loss": [],
-    }
+    data_fields = [
+        "env",
+        "policy",
+        "episode",
+        "avg_reward",
+        "max_path_length",
+        "learning_rate",
+        "num_epochs",
+        "batch_size",
+        "path_len_limit",
+        "discount",
+        "baseline_train_batch_size",
+        "baseline_num_epochs"
+    ]
 
-    for iter_num in range(num_epochs):
-        sample_trajs = []
-        for _ in range(batch_size):
-            sample_traj = rollout(env,policy,device,episode_length=max_path_length)
-            sample_trajs.append(sample_traj)
+    csv_log = CSVLogger(csv_path, data_fields) if csv_path else None # INITIALIZE
 
-        #if len(sample_trajs) > 0:
-        epoch_avg_reward = np.mean(np.asarray([traj['reward_arr'].sum() for traj in sample_trajs]))
-        epoch_max_path_len = np.max(np.asarray([traj['reward_arr'].shape[0] for traj in sample_trajs]))
+    if csv_log:
+        csv_log = csv_log.__enter__() # ENTER: FILE OPEN
 
-        history["episode"].append(iter_num)
-        history["avg_reward"].append(epoch_avg_reward)
-        history["max_path_length"].append(epoch_max_path_len)
+    try:
 
-        if iter_num % print_freq == 0:
-            print("Episode: {}, reward: {}, max path length: {}".format(iter_num,epoch_avg_reward,epoch_max_path_len,))
+        ### ROLLOUT !!!
 
-        # Logging returns occasionally
-        #if iter_num % print_freq == 0:
-        #    epoch_avg_reward = np.mean(np.asarray([traj['return'].sum() for traj in sample_trajs]))
-        #    epoch_max_path_len = np.max(np.asarray([traj['reward_arr'].shape[0] for traj in sample_trajs]))
-        #    print("Episode: {}, reward: {}, max path length: {}".format(iter_num, epoch_avg_reward, epoch_max_path_len))
+        for iter_num in range(num_epochs): # NUM EPOCHS
+            sample_trajs = []
+            for _ in range(batch_size): # NUM TRAJECTORIES
+                sample_traj = rollout(env, policy, device, episode_length=path_len_limit)
+                sample_trajs.append(sample_traj)
 
-        # Training model
-        train_model(policy, baseline, sample_trajs, policy_optim, baseline_optim, device, gamma=gamma,
-                    baseline_train_batch_size=baseline_train_batch_size, baseline_num_epochs=baseline_num_epochs)
-    return history
+            ### LOGGING !!!
+
+            ## CALCULATIONS !!
+
+            episode_returns = np.fromiter((float(traj["reward_arr"].sum()) for traj in sample_trajs),dtype=np.float32)
+            path_lengths = np.fromiter((traj["reward_arr"].shape[0] for traj in sample_trajs),dtype=np.int32)
+            epoch_avg_reward = float(episode_returns.mean())
+            epoch_max_path_len = int(path_lengths.max())
+
+            ## PRINT !!
+
+            if iter_num % print_freq == 0:
+                print("Episode: {}, reward: {}, max path length: {}".format(iter_num,epoch_avg_reward,epoch_max_path_len,))
+
+            ## ALTERNATE PRINT !!
+
+            #if iter_num % print_freq == 0:
+            #epoch_avg_reward = np.mean(np.asarray([traj['return'].sum() for traj in sample_trajs]))
+            #epoch_max_path_len = np.max(np.asarray([traj['reward_arr'].shape[0] for traj in sample_trajs]))
+            #    print("Episode: {}, reward: {}, max path length: {}".format(iter_num, epoch_avg_reward, epoch_max_path_len))
+
+            ## TRAIN MODEL !!
+
+            train_model(policy, baseline, sample_trajs, policy_optim, baseline_optim, device, discount=discount,
+                                  baseline_train_batch_size=baseline_train_batch_size, baseline_num_epochs=baseline_num_epochs)
+
+            ## WRITE TO LOG !!
+
+            if csv_log:
+                csv_log.write({
+                    "env": env,
+                    "policy": policy,
+                    "episode": iter_num,
+                    "avg_reward": epoch_avg_reward,
+                    "max_path_length": epoch_max_path_len,
+                    "learning_rate": learning_rate,
+                    "num_epochs": num_epochs,
+                    "batch_size": batch_size,
+                    "path_len_limit": path_len_limit,
+                    "discount": discount,
+                    "baseline_train_batch_size": baseline_train_batch_size,
+                    "baseline_num_epochs": baseline_num_epochs
+                })
+    finally:
+        if csv_log:
+            csv_log.__exit__(None, None, None) # TRY AND FINALLY W/ EXIT: FILE CLOSE
+    return

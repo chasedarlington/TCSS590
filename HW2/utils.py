@@ -123,8 +123,8 @@ def collect_trajs(
     raw_next_obs = []
     action_arr = []
     reward_arr = []
-    dones = []
-    images = []
+    done_arr = []
+    image_arr = []
 
     path_length = 0
 
@@ -166,34 +166,32 @@ def collect_trajs(
         raw_next_obs.append(next_o)
         action_arr.append(action)
         reward_arr.append(r)
-        dones.append(done)
+        done_arr.append(done)
         path_length += 1
         if done:
             break
         o = next_o
 
     # Prepare the items to be returned
-    observations = np.array(raw_obs)
-    next_observations = np.array(raw_next_obs)
+    state_arr = np.array(raw_obs)
+    next_state_arr = np.array(raw_next_obs)
     action_arr = np.array(action_arr)
     if len(action_arr.shape) == 1:
         action_arr = np.expand_dims(action_arr, 1)
     reward_arr = np.array(reward_arr)
     if len(reward_arr.shape) == 1:
         reward_arr = reward_arr.reshape(-1, 1)
-    dones = np.array(dones).reshape(-1, 1)
+    done_arr = np.array(done_arr).reshape(-1, 1)
 
     # Return in the following format
     return dict(
-        observations=observations,
-        next_observations=next_observations,
-        actions=action_arr,
-        rewards=reward_arr,
-        dones=np.array(dones).reshape(-1, 1),
-        images=np.array(images)
+        state_arr=state_arr,
+        next_state_arr=next_state_arr,
+        action_arr=action_arr,
+        reward_arr=reward_arr,
+        done_arr=np.array(done_arr).reshape(-1, 1),
+        image_arr=np.array(image_arr)
     )
-
-
 
 def mlp(input_dim, hidden_dim, output_dim, hidden_depth, output_mod=None):
     if hidden_depth == 0:
@@ -222,10 +220,10 @@ def rollout(
     # Collect the following data
     raw_obs = []
     raw_next_obs = []
-    actions = []
-    rewards = []
-    dones = []
-    images = []
+    action_arr = []
+    reward_arr = []
+    done_arr = []
+    image_arr = []
 
     entropy = None
     log_prob = None
@@ -257,9 +255,9 @@ def rollout(
 
         raw_obs.append(o)
         raw_next_obs.append(next_o)
-        actions.append(action)
-        rewards.append(r)
-        dones.append(done or truncated) # UPDATED TO REFLECT NEW GYM API
+        action_arr.append(action)
+        reward_arr.append(r)
+        done_arr.append(done or truncated) # UPDATED TO REFLECT NEW GYM API
         path_length += 1
         if done or truncated: # UPDATED TO REFLECT NEW GYM API
             break
@@ -268,20 +266,20 @@ def rollout(
     # Prepare the items to be returned
     observations = np.array(raw_obs)
     next_observations = np.array(raw_next_obs)
-    actions = np.array(actions)
-    if len(actions.shape) == 1:
-        actions = np.expand_dims(actions, 1)
-    rewards = np.array(rewards)
-    if len(rewards.shape) == 1:
-        rewards = rewards.reshape(-1, 1)
-    dones = np.array(dones).reshape(-1, 1)
+    action_arr = np.array(action_arr)
+    if len(action_arr.shape) == 1:
+        action_arr = np.expand_dims(action_arr, 1)
+    reward_arr = np.array(reward_arr)
+    if len(reward_arr.shape) == 1:
+        reward_arr = reward_arr.reshape(-1, 1)
+    done_arr = np.array(done_arr).reshape(-1, 1)
 
     # Return in the following format
     return dict(
         state_arr=observations,
         next_state_arr=next_observations,
-        action_arr=actions,
-        reward_arr=rewards,
-        done_arr=np.array(dones).reshape(-1, 1),
-        images=np.array(images)
+        action_arr=action_arr,
+        reward_arr=reward_arr,
+        done_arr=np.array(done_arr).reshape(-1, 1),
+        images=np.array(image_arr)
     )

@@ -65,8 +65,9 @@ if __name__ == '__main__':
                               hidden_depth=hidden_depth_baseline).to(device)
 
         # HYPERPARAMETERS
+        learning_rate=0.001
         num_epochs=200
-        max_path_length=200
+        path_len_limit=200
         batch_size=100
         gamma=0.99
         baseline_train_batch_size=64
@@ -79,9 +80,10 @@ if __name__ == '__main__':
         if not args.test:
             
             # SIMULATE: run the policy gradient training loop; update policy + baseline
-            history = simulate_policy_pg(env, policy, baseline, num_epochs=num_epochs, max_path_length=max_path_length,
-                            batch_size=batch_size, gamma=gamma, baseline_train_batch_size=baseline_train_batch_size, 
-                            device=device, baseline_num_epochs=baseline_num_epochs, print_freq=print_freq, render=args.render)
+            history = simulate_policy_pg(env, policy, baseline, num_epochs=num_epochs, path_len_limit=path_len_limit,
+                                         batch_size=batch_size, discount=gamma, baseline_train_batch_size=baseline_train_batch_size,
+                                         device=device, baseline_num_epochs=baseline_num_epochs, learning_rate = learning_rate,
+                                         print_freq=print_freq, render=args.render, csv_path="logs/policy_gradient_metrics.csv")
             
             # SAVE: save trained policy weights (in .pth file)
             torch.save(policy.state_dict(), 'pg_final.pth')
@@ -90,8 +92,8 @@ if __name__ == '__main__':
         else:
             policy.load_state_dict(torch.load(f'pg_final.pth'))
         
-        # EVALUATE: Run the policy in the environment x times, for up to max_path_length steps each time, optionally render the environment
-        evaluate(env,policy,device,num_validation_runs=eval_ep_count, episode_length=max_path_length, render=args.render)
+        # EVALUATE: Run the policy in the environment x times, for up to path_len_limit steps each time, optionally render the environment
+        evaluate(env, policy, device, num_validation_runs=eval_ep_count, episode_length=path_len_limit, render=args.render)
 
     if args.task == 'actor_critic':
 
@@ -106,8 +108,9 @@ if __name__ == '__main__':
         hidden_depth = 2
 
         # HYPERPARAMETERS
+        learning_rate = 0.001
         discount = 0.99
-        max_path_length = 200
+        path_len_limit = 200
         num_epochs = 200
         batch_size = 64
         num_update_steps = 100
@@ -129,9 +132,9 @@ if __name__ == '__main__':
             
             # SIMULATE: run the actor-critic training loop; update policy + Q-networks, and use replay buffer to store experience 
             history = simulate_policy_ac(env, policy, qf, target_qf, replay_buffer, device,
-                               episode_length=max_path_length, num_epochs=num_epochs, 
-                               batch_size=batch_size, num_update_steps=num_update_steps,
-                               print_freq=print_freq, render=args.render)
+                                         path_len_limit=path_len_limit, num_epochs=num_epochs,
+                                         batch_size=batch_size, num_update_steps=num_update_steps,
+                                         print_freq=print_freq, render=args.render)
             
             # SAVE: save trained policy weights (in .pth file)
             torch.save(policy.state_dict(), 'ac_final.pth')
@@ -140,34 +143,7 @@ if __name__ == '__main__':
         else:
             policy.load_state_dict(torch.load(f'ac_final.pth'))
 
-        # EVALUATE: Run the policy in the environment x times, for up to max_path_length steps each time, optionally render the environment
+        # EVALUATE: Run the policy in the environment x times, for up to path_len_limit steps each time, optionally render the environment
         evaluate(env,policy,device,num_validation_runs=eval_ep_count,episode_length=ep_length,render=args.render)
-
-    if args.plot:
-        plt.figure()
-        plt.plot(history["episode"], history["avg_reward"])
-        plt.xlabel("Episode")
-        plt.ylabel("Average Reward")
-        plt.title("Actor-Critic Learning Curve")
-        plt.grid(True)
-        plt.show()
-
-        plt.figure()
-        plt.plot(history["episode"], history["max_path_length"])
-        plt.xlabel("Episode")
-        plt.ylabel("Max Path Length")
-        plt.title("Max Path Length During Training")
-        plt.grid(True)
-        plt.show()
-
-        plt.figure()
-        plt.plot(history["episode"], history["policy_loss"], label="Policy Loss")
-        plt.plot(history["episode"], history["qf_loss"], label="QF Loss")
-        plt.xlabel("Episode")
-        plt.ylabel("Loss")
-        plt.title("Actor and Critic Loss")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
 
 

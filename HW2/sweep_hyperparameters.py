@@ -14,9 +14,9 @@ import numpy as np
 
         
         num_epochs=200
-        max_path_length=200
+        path_len_limit=200
         batch_size=100
-        gamma=0.99
+        discount=0.99
         baseline_train_batch_size=64
         baseline_num_epochs=5
         print_freq=10
@@ -26,7 +26,7 @@ import numpy as np
 """     if args.task == 'actor_critic':
 
         discount = 0.99
-        max_path_length = 200
+        path_len_limit = 200
         num_epochs = 200
         batch_size = 64
         num_update_steps = 100
@@ -37,7 +37,7 @@ import numpy as np
 
 DEFAULTS = {
     "num_epochs": 500,
-    "episode_length": 50,
+    "path_len_limit": 50,
     "batch_size": 32,
     "num_validation_runs": 100,
 }
@@ -136,7 +136,7 @@ def run_main(
         "--policy", policy,
         "--seed", str(seed),
         "--num_epochs", str(num_epochs),
-        "--episode_length", str(episode_length),
+        "--path_len_limit", str(episode_length),
         "--batch_size", str(batch_size),
         "--num_validation_runs", str(num_validation_runs),
     ]
@@ -169,7 +169,7 @@ def sweep_one_hyperparameter(
     print(
         "Fixed baseline -> "
         f"num_epochs={baseline['num_epochs']}, "
-        f"episode_length={baseline['episode_length']}, "
+        f"path_len_limit={baseline['path_len_limit']}, "
         f"batch_size={baseline['batch_size']}, "
         f"num_validation_runs={baseline['num_validation_runs']}"
     )
@@ -185,7 +185,7 @@ def sweep_one_hyperparameter(
             print(
                 f"  seed={seed} | "
                 f"num_epochs={run_params['num_epochs']}, "
-                f"episode_length={run_params['episode_length']}, "
+                f"path_len_limit={run_params['path_len_limit']}, "
                 f"batch_size={run_params['batch_size']}, "
                 f"num_validation_runs={run_params['num_validation_runs']}"
             )
@@ -197,7 +197,7 @@ def sweep_one_hyperparameter(
                 policy=args.policy,
                 seed=seed,
                 num_epochs=run_params["num_epochs"],
-                episode_length=run_params["episode_length"],
+                episode_length=run_params["path_len_limit"],
                 batch_size=run_params["batch_size"],
                 num_validation_runs=run_params["num_validation_runs"],
             )
@@ -214,7 +214,7 @@ def sweep_one_hyperparameter(
                     "sweep_name": sweep_name,
                     "sweep_value": sweep_value,
                     "num_epochs": run_params["num_epochs"],
-                    "episode_length": run_params["episode_length"],
+                    "path_len_limit": run_params["path_len_limit"],
                     "batch_size": run_params["batch_size"],
                     "num_validation_runs": run_params["num_validation_runs"],
                     "seed": seed,
@@ -236,7 +236,7 @@ def sweep_one_hyperparameter(
                     "sweep_name": sweep_name,
                     "sweep_value": sweep_value,
                     "num_epochs": run_params["num_epochs"],
-                    "episode_length": run_params["episode_length"],
+                    "path_len_limit": run_params["path_len_limit"],
                     "batch_size": run_params["batch_size"],
                     "num_validation_runs": run_params["num_validation_runs"],
                     "seed": seed,
@@ -262,7 +262,7 @@ def sweep_one_hyperparameter(
                     "sweep_name": sweep_name,
                     "sweep_value": sweep_value,
                     "num_epochs": run_params["num_epochs"],
-                    "episode_length": run_params["episode_length"],
+                    "path_len_limit": run_params["path_len_limit"],
                     "batch_size": run_params["batch_size"],
                     "num_validation_runs": run_params["num_validation_runs"],
                     "seed": seed,
@@ -276,7 +276,7 @@ def sweep_one_hyperparameter(
                 "sweep_name": sweep_name,
                 "sweep_value": sweep_value,
                 "num_epochs": run_params["num_epochs"],
-                "episode_length": run_params["episode_length"],
+                "path_len_limit": run_params["path_len_limit"],
                 "batch_size": run_params["batch_size"],
                 "num_validation_runs": run_params["num_validation_runs"],
                 "seed": seed,
@@ -331,7 +331,7 @@ def sweep_one_hyperparameter(
             "sweep_name",
             "sweep_value",
             "num_epochs",
-            "episode_length",
+            "path_len_limit",
             "batch_size",
             "num_validation_runs",
             "seed",
@@ -349,7 +349,7 @@ def sweep_one_hyperparameter(
             "sweep_name",
             "sweep_value",
             "num_epochs",
-            "episode_length",
+            "path_len_limit",
             "batch_size",
             "num_validation_runs",
             "seed",
@@ -512,7 +512,7 @@ def main():
     # User-friendly singular flags.
     # These accept variable-length lists so they can be used both as baselines and sweep values.
     parser.add_argument("--num_epochs", type=int, nargs="+", default=None)
-    parser.add_argument("--episode_length", type=int, nargs="+", default=None)
+    parser.add_argument("--path_len_limit", type=int, nargs="+", default=None)
     parser.add_argument("--batch_size", type=int, nargs="+", default=None)
     parser.add_argument("--num_validation_runs", type=int, nargs="+", default=None)
 
@@ -532,8 +532,8 @@ def main():
         dest="sweeps",
         type=str,
         nargs="+",
-        default=["num_epochs", "episode_length", "batch_size", "num_validation_runs"],
-        choices=["num_epochs", "episode_length", "batch_size", "num_validation_runs"],
+        default=["num_epochs", "path_len_limit", "batch_size", "num_validation_runs"],
+        choices=["num_epochs", "path_len_limit", "batch_size", "num_validation_runs"],
     )
 
     parser.add_argument("--main_file", type=str, default="main.py")
@@ -549,7 +549,7 @@ def main():
     # If user passes --num_epochs 300, this becomes the baseline.
     baseline = {
         "num_epochs": first_or_default(args.num_epochs, DEFAULTS["num_epochs"]),
-        "episode_length": first_or_default(args.episode_length, DEFAULTS["episode_length"]),
+        "path_len_limit": first_or_default(args.episode_length, DEFAULTS["path_len_limit"]),
         "batch_size": first_or_default(args.batch_size, DEFAULTS["batch_size"]),
         "num_validation_runs": first_or_default(
             args.num_validation_runs,
@@ -567,9 +567,9 @@ def main():
             args.num_epochs_values if args.num_epochs_values is not None else args.num_epochs,
             baseline["num_epochs"],
         ),
-        "episode_length": values_or_single(
+        "path_len_limit": values_or_single(
             args.episode_length_values if args.episode_length_values is not None else args.episode_length,
-            baseline["episode_length"],
+            baseline["path_len_limit"],
         ),
         "batch_size": values_or_single(
             args.batch_size_values if args.batch_size_values is not None else args.batch_size,
@@ -586,7 +586,7 @@ def main():
     experiment_prefix = (
         f"{args.env}_{args.train}_{args.policy}"
         f"_baseEpochs{baseline['num_epochs']}"
-        f"_baseEpLen{baseline['episode_length']}"
+        f"_baseEpLen{baseline['path_len_limit']}"
         f"_baseBatch{baseline['batch_size']}"
         f"_baseValRuns{baseline['num_validation_runs']}"
     )
