@@ -1,3 +1,13 @@
+import warnings
+import logging
+
+# Suppress Python warnings
+warnings.filterwarnings("ignore")
+
+# Suppress Gymnasium / Gymnasium-Robotics warning logs
+logging.getLogger("gymnasium").setLevel(logging.ERROR)
+logging.getLogger("gymnasium_robotics").setLevel(logging.ERROR)
+
 import gymnasium as gym
 import numpy as np
 import torch
@@ -7,7 +17,6 @@ from actor_critic import simulate_policy_ac, ReplayBuffer
 from utils import ACPolicy, QF, TargetQF, PGPolicy, PGBaseline
 from evaluate import evaluate
 import random
-import matplotlib.pyplot as plt
 
 # OVERRIDING GPU USE BECAUSE THE CURRENT PG IMPLEMENTATION IS MORE SEQUENTIAL
 # environment and NumPy work stay on CPU
@@ -65,26 +74,30 @@ if __name__ == '__main__':
                               hidden_depth=hidden_depth_baseline).to(device)
 
         # HYPERPARAMETERS
-        learning_rate=0.001
+        learning_rate=0.001 # IMPORTANT !
         num_epochs=200
+        batch_size=100 # IMPORTANT !
         path_len_limit=200
-        batch_size=100
-        gamma=0.99
+
+        discount=0.99 # IMPORTANT !
         baseline_train_batch_size=64
-        baseline_num_epochs=5
+        baseline_num_epochs=5 # IMPORTANT !
         eval_ep_count=100
         print_freq = 10
 
-        # TRAIN: run policy in env, train/update policy, and use baseline netowrk for stability
+
+
+        # TRAIN: run policy in env, train/update policy, and use baseline network for stability
         #   then save trained policy weights (in .pth file)
         if not args.test:
             
             # SIMULATE: run the policy gradient training loop; update policy + baseline
-            history = simulate_policy_pg(env, policy, baseline, num_epochs=num_epochs, path_len_limit=path_len_limit,
-                                         batch_size=batch_size, discount=gamma, baseline_train_batch_size=baseline_train_batch_size,
-                                         device=device, baseline_num_epochs=baseline_num_epochs, learning_rate = learning_rate,
-                                         print_freq=print_freq, render=args.render, csv_path="logs/policy_gradient_metrics.csv")
-            
+            simulate_policy_pg(env, policy, baseline, num_epochs=num_epochs, path_len_limit=path_len_limit,
+                               batch_size=batch_size, discount=discount, baseline_train_batch_size=baseline_train_batch_size,
+                               device=device, baseline_num_epochs=baseline_num_epochs, learning_rate = learning_rate,
+                               print_freq=print_freq, render=args.render, csv_path = "logs/policy_gradient_metrics.csv"
+                               )
+
             # SAVE: save trained policy weights (in .pth file)
             torch.save(policy.state_dict(), 'pg_final.pth')
         
@@ -115,7 +128,6 @@ if __name__ == '__main__':
         batch_size = 64
         num_update_steps = 100
         eval_ep_count = 100
-        ep_length = 200
         print_freq = 10
 
 
@@ -131,10 +143,10 @@ if __name__ == '__main__':
             target_qf = TargetQF(env.observation_space.shape[-1] + env.action_space.shape[-1], hidden_dim=hidden_dim, hidden_depth=hidden_depth).to(device)
             
             # SIMULATE: run the actor-critic training loop; update policy + Q-networks, and use replay buffer to store experience 
-            history = simulate_policy_ac(env, policy, qf, target_qf, replay_buffer, device,
+            simulate_policy_ac(env, policy, qf, target_qf, replay_buffer, device,
                                          path_len_limit=path_len_limit, num_epochs=num_epochs,
                                          batch_size=batch_size, num_update_steps=num_update_steps,
-                                         print_freq=print_freq, render=args.render)
+                                         print_freq=print_freq, render=args.render, csv_path="logs/actor_critic_metrics.csv")
             
             # SAVE: save trained policy weights (in .pth file)
             torch.save(policy.state_dict(), 'ac_final.pth')
@@ -144,6 +156,6 @@ if __name__ == '__main__':
             policy.load_state_dict(torch.load(f'ac_final.pth'))
 
         # EVALUATE: Run the policy in the environment x times, for up to path_len_limit steps each time, optionally render the environment
-        evaluate(env,policy,device,num_validation_runs=eval_ep_count,episode_length=ep_length,render=args.render)
+        evaluate(env,policy,device,num_validation_runs=eval_ep_count,episode_length=path_len_limit,render=args.render)
 
 

@@ -9,13 +9,6 @@ import os
 
 file_name = os.path.basename(__file__)
 
-def print_shape(name, tensor):
-    print(f"{name}: shape={tuple(tensor.shape)}, ndim={tensor.dim()}")
-    for i, size in enumerate(tensor.shape):
-        print(f"  dim={i}: size={size}")
-    print(f"  dim=-1 refers to dim={tensor.dim() - 1}")
-    print()
-
 class ReplayBuffer(object):
     """Buffer to store environment transitions."""
 
@@ -68,7 +61,6 @@ class ReplayBuffer(object):
 
         return state_arr, action_arr, reward_arr, next_state_arr, not_done_arr
 
-
 def compute_losses(policy, qf, target_qf, state_arr, action_arr, reward_arr, next_state_arr, not_done_arr, device, discount=0.99):
 
     ## FORMAT STATES, ACTIONS, REWARDS, NEXT STATES, AND NOT DONE - PULL NUMPY ARRAYS AS TENSORS
@@ -93,7 +85,6 @@ def compute_losses(policy, qf, target_qf, state_arr, action_arr, reward_arr, nex
 
     return policy_loss, qf_loss
 
-
 def soft_update_target(net, target_net, tau):
     for param, target_param in zip(net.parameters(), target_net.parameters()):
         target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
@@ -101,6 +92,8 @@ def soft_update_target(net, target_net, tau):
 def simulate_policy_ac(
 
         ## POLICY
+        run_id,
+        seed,
         env, # gym.make("InvertedPendulum-v4", render_mode="human" if args.render else None)
         policy, # policy (ACPolicy) neural network
         qf, # policy (QF) neural network
@@ -108,19 +101,19 @@ def simulate_policy_ac(
         replay_buffer, # ReplayBuffer(obs_size, ac_size, capacity, device)
 
         ## HYPERPARAMETERS
-        learning_rate=3e-4, # optim.Adam learning rate ~ step size for .backward() and .step()
+        learning_rate = 3e-4, # optim.Adam learning rate ~ step size for .backward() and .step()
         num_epochs: int = 200, # number of outer iterations for training loop
-        batch_size=32, # number of rollout trajectories, and repeats per replay buffer
+        batch_size = 32, # number of rollout trajectories, and repeats per replay buffer
         path_len_limit: int = 100, # maximum steps per rollout
-        discount=0.99, # discount factor; how much are future rewards worth right now?
-        target_weight=5e-3, # soft update rate; how quickly does target_qf move towards qf?
-        num_update_steps=100, # number of gradient update rounds per epoch; how many update rounds per epoch?
+        discount = 0.99, # discount factor; how much are future rewards worth right now?
+        target_weight = 5e-3, # soft update rate; how quickly does target_qf move towards qf?
+        ac_update_steps = 100, # number of gradient update rounds per epoch; how many update rounds per epoch?
 
         ## SYSTEM AND LOGGING
-        print_freq=10,  # print frequency
-        device="cuda",  # device (cuda or cpu)
-        render=False,  # render the gym.make env?
-        csv_path=None  # path for CSV log
+        print_freq = 10,  # print frequency
+        device = "cuda",  # device (cuda or cpu)
+        render = False,  # render the gym.make env?
+        csv_path = None  # path for CSV log
 ):
 
     env.reset()
@@ -134,8 +127,8 @@ def simulate_policy_ac(
     data_fields = [
         "env",
         "policy",
-        #"run_id",
-        #"seed",
+        "run_id",
+        "seed",
         "epoch",
         "avg_reward",
         "max_path_length",
@@ -147,7 +140,7 @@ def simulate_policy_ac(
         "path_len_limit",
         "discount",
         "target_weight",
-        "num_update_steps"
+        "ac_update_steps"
     ]
 
     csv_log = CSVLogger(csv_path, data_fields) if csv_path else None  # INITIALIZE
@@ -168,7 +161,7 @@ def simulate_policy_ac(
             epoch_policy_losses = []
             epoch_qf_losses = []
 
-            for update_num in range(num_update_steps):
+            for update_num in range(ac_update_steps):
                 state_arr, action_arr, reward_arr, next_state_arr, not_done_arr = replay_buffer.sample(batch_size)
 
                 policy_loss, qf_loss = compute_losses(policy, qf, target_qf, state_arr,
@@ -212,21 +205,14 @@ def simulate_policy_ac(
                     )
                 )
 
-            ## ALTERNATE PRINT !!
-
-            #if iter_num % print_freq == 0:
-            #    epoch_avg_reward = np.mean(np.asarray([traj['reward_arr'].sum() for traj in sample_trajs]))
-            #    epoch_max_path_len = np.max(np.asarray([traj['reward_arr'].shape[0] for traj in sample_trajs]))
-            #    print("Episode: {}, reward: {}, max path length: {}".format(iter_num, epoch_avg_reward, epoch_max_path_len))
-
             ## WRITE TO LOG !!
 
             if csv_log:
                 csv_log.write({
                     "env": env.spec.id,
                     "policy": file_name,
-                    #"run_id": None,
-                    #"seed": None,
+                    "run_id": run_id,
+                    "seed": seed,
                     "epoch": iter_num,
                     "avg_reward": epoch_avg_reward,
                     "max_path_length": epoch_max_path_len,
@@ -238,7 +224,7 @@ def simulate_policy_ac(
                     "path_len_limit": path_len_limit,
                     "discount": discount,
                     "target_weight": target_weight,
-                    "num_update_steps": num_update_steps
+                    "ac_update_steps": ac_update_steps
                 })
     finally:
         if csv_log:

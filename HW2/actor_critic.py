@@ -5,7 +5,9 @@ import copy
 import numpy as np
 from utils import collect_trajs
 from csv_logger import CSVLogger
+import os
 
+file_name = os.path.basename(__file__)
 
 def print_shape(name, tensor):
     print(f"{name}: shape={tuple(tensor.shape)}, ndim={tensor.dim()}")
@@ -132,16 +134,20 @@ def simulate_policy_ac(
     data_fields = [
         "env",
         "policy",
-        "episode",
+        #"run_id",
+        #"seed",
+        "epoch",
         "avg_reward",
         "max_path_length",
+        "avg_policy_loss",
+        "avg_qf_loss",
         "learning_rate",
         "num_epochs",
         "batch_size",
         "path_len_limit",
         "discount",
         "target_weight",
-        "num_update_steps"
+        "ac_update_steps"
     ]
 
     csv_log = CSVLogger(csv_path, data_fields) if csv_path else None  # INITIALIZE
@@ -190,6 +196,8 @@ def simulate_policy_ac(
             path_lengths = np.fromiter((traj["reward_arr"].shape[0] for traj in sample_trajs), dtype=np.int32)
             epoch_avg_reward = float(episode_returns.mean())
             epoch_max_path_len = int(path_lengths.max())
+            epoch_avg_p_loss = float(np.mean(epoch_policy_losses))
+            epoch_avg_q_loss = float(np.mean(epoch_qf_losses))
 
             ## PRINT !!
 
@@ -198,7 +206,9 @@ def simulate_policy_ac(
                     "Episode: {}, reward: {}, max path length: {}, policy loss: {:.4f}, qf loss: {:.4f}".format(
                         iter_num,
                         epoch_avg_reward,
-                        epoch_max_path_len
+                        epoch_max_path_len,
+                        epoch_avg_p_loss,
+                        epoch_avg_q_loss
                     )
                 )
 
@@ -213,20 +223,23 @@ def simulate_policy_ac(
 
             if csv_log:
                 csv_log.write({
-                    "env": env,
-                    "policy": policy,
-                    "episode": iter_num,
+                    "env": env.spec.id,
+                    "policy": file_name,
+                    #"run_id": None,
+                    #"seed": None,
+                    "epoch": iter_num,
                     "avg_reward": epoch_avg_reward,
                     "max_path_length": epoch_max_path_len,
+                    "avg_policy_loss": epoch_avg_p_loss,
+                    "avg_qf_loss": epoch_avg_q_loss,
                     "learning_rate": learning_rate,
                     "num_epochs": num_epochs,
                     "batch_size": batch_size,
                     "path_len_limit": path_len_limit,
                     "discount": discount,
                     "target_weight": target_weight,
-                    "num_update_steps": num_update_steps
+                    "ac_update_steps": num_update_steps
                 })
     finally:
         if csv_log:
             csv_log.__exit__(None, None, None)  # TRY AND FINALLY W/ EXIT: FILE CLOSE
-    return

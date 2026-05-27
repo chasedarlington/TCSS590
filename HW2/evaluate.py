@@ -7,7 +7,7 @@ from utils import rollout
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def evaluate(env, policy, device,num_validation_runs, episode_length, render):
+def evaluate(env, policy, device,num_validation_runs, episode_length, render=False):
     success_count = 0
     rewards_suc = 0
     rewards_all = 0

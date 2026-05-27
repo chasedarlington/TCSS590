@@ -3,11 +3,15 @@ import numpy as np
 from torch import optim
 from utils import rollout, log_density
 from csv_logger import CSVLogger
+import os
 
 """
 Train one policy-gradient update using collected trajectory data.
 Also trains the baseline network to predict returns.
 """
+
+file_name = os.path.basename(__file__)
+
 def train_model(
         policy,
         baseline,
@@ -206,7 +210,9 @@ def simulate_policy_pg(
     data_fields = [
         "env",
         "policy",
-        "episode",
+        "run_id",
+        #"seed",
+        #"epoch",
         "avg_reward",
         "max_path_length",
         "learning_rate",
@@ -263,9 +269,11 @@ def simulate_policy_pg(
 
             if csv_log:
                 csv_log.write({
-                    "env": env,
-                    "policy": policy,
-                    "episode": iter_num,
+                    "env": env.spec.id,
+                    "policy": file_name,
+                    #"run_id": None,
+                    #"seed": None,
+                    "epoch": iter_num,
                     "avg_reward": epoch_avg_reward,
                     "max_path_length": epoch_max_path_len,
                     "learning_rate": learning_rate,
@@ -279,4 +287,3 @@ def simulate_policy_pg(
     finally:
         if csv_log:
             csv_log.__exit__(None, None, None) # TRY AND FINALLY W/ EXIT: FILE CLOSE
-    return
