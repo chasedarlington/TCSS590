@@ -1,4 +1,3 @@
-# @title Neccessary imports
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,36 +42,31 @@ class AgentPPO(nn.Module):
         super(AgentPPO, self).__init__()
         self.actor = Actor(state_dim , action_dim)
         self.critic = Critic(state_dim)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")      # device used
 
     def act(self, state):
-        state = torch.FloatTensor(state.cpu()).to(self.device)
-        action_logits = self.actor(state)# output of actor nn
-        SoftMax = nn.Softmax(dim=-1)
-        action_probs = SoftMax(action_logits)# outputs -> probabilities
-        dist = Categorical(probs = action_probs)# distribution according to the probabilities
+        state = torch.as_tensor(state, device = self.device, dtype = torch.float32)
+        #state = torch.FloatTensor(state.cpu()).to(self.device)
+        action_logits = self.actor(state) # output of actor nn
+        #SoftMax = nn.Softmax(dim=-1)
+        #action_probs = SoftMax(action_logits)# outputs -> probabilities
+        #dist = Categorical(probs = action_probs)# distribution according to the probabilities
+        dist = Categorical(logits=action_logits)
         selected_action = dist.sample()# random action sampling from the distribution
-        log_prob = dist.log_prob(selected_action)# log of the probability of the seleced action (for calculating loss)
-        state_value = self.critic(state)# expected value of the current
-
+        log_prob = dist.log_prob(selected_action)# log of the probability of the selected action (for calculating loss)
+        state_value = self.critic(state) # expected value of the current
         return selected_action , log_prob, state_value
 
 
     def evaluate(self, state, action):
-
-        state = torch.FloatTensor(state.cpu()).to(self.device)
-
-        action_logits = self.actor(state)# output of actor
-
-        SoftMax = nn.Softmax(dim=-1)
-        action_probs = SoftMax(action_logits)# outputs -> probabilities
-
-        dist = Categorical(probs = action_probs)# discrete distribution from the probabilities
-
+        #state = torch.FloatTensor(state.cpu()).to(self.device)
+        action_logits = self.actor(state) # output of actor
+        # SoftMax = nn.Softmax(dim=-1)
+        #action_probs = SoftMax(action_logits)# outputs -> probabilities
+        #dist = Categorical(probs = action_probs)# discrete distribution from the probabilities
+        dist = Categorical(logits = action_logits)
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
         state_values = self.critic(state)
-
         return action_logprobs , state_values, dist_entropy
 
     def save_model(self, filepath: str):

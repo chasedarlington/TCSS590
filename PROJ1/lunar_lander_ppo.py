@@ -1,15 +1,18 @@
-# @title Neccessary imports
+import Categorical
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from lunar_lander_models import AgentPPO
 
-# @title PPO Discrete
-GAMMA = 0.99            # discount factor
-TAU = 1e-3              # for soft update of target parameters
-LR_ACTOR = 0.0005       # learning rate of the actor
-LR_CRITIC = 0.0005      # learning rate of the critic
+TIMESTEP = 2048 #1000 # update policy every n timesteps
+EPOCHS = 10 # update policy for n epochs
+EPSILON = 0.2 # clip log prob ratio to 1 +/- epsilon (PPO clip parameter)
+GAMMA = 0.99 # discount factor
+TAU = 1e-3 # for soft update of target parameters
+LR_ACTOR = 0.0005 # learning rate of the actor
+LR_CRITIC = 0.0005 # learning rate of the critic
+
 
 # CLASS: PPOAgent for discrete action spaces (e.g. LunarLander-v3)
 class PPOAgent:
@@ -23,11 +26,11 @@ class PPOAgent:
     OUTPUTS: None
     """
     def __init__(self , state_size, action_size, device):
-        # self.max_training_timesteps = int(5e5)     # break training loop if timeteps > max_training_timesteps
-        self.update_timestep = 1000                # update policy every n timesteps
-        self.epochs = 10                           # update policy for n epochs
-        self.epsilon = 0.2                         # clip log prob ratio to 1 +/- epsilon (PPO clip parameter) 
-        self.gamma = GAMMA                         # discount factor
+        # self.max_training_timesteps = int(5e5) # break training loop if timeteps > max_training_timesteps
+        self.update_timestep = TIMESTEP
+        self.epochs = EPOCHS
+        self.epsilon = EPSILON
+        self.gamma = GAMMA
         self.device = device
         self.state_dim = state_size
         self.action_dim = action_size
@@ -55,6 +58,13 @@ class PPOAgent:
         del self.dones[:]
 
     def act(self, state):
+        action_logits = self.actor(state)
+        dist = Categorical(logits=action_logits)
+        selected_action = dist.sample()
+        log_prob = dist.log_prob(selected_action)
+        state_value = self.critic(state)
+        return selected_action, log_prob, state_value
+        """
         #return action given a state
         with torch.no_grad():
           state = torch.as_tensor(state, device=self.device, dtype=torch.float32)
@@ -65,9 +75,19 @@ class PPOAgent:
         self.logprobs.append(action_logprob)
         self.state_values.append(state_val)
         return action.item()
+        """
+
+    def evaluate(self, state, action):
+        action_logits = self.actor(state)
+        dist = Categorical(logits=action_logits)
+        action_logprobs = dist.log_prob(action)
+        dist_entropy = dist.entropy()
+        state_values = self.critic(state)
+        return action_logprobs, state_values, dist_entropy
 
     def update(self , rewards): # detach() to prevent backpropagation through old policy's states/actions/logprobs/state_values
-        old_states = torch.squeeze(torch.stack(self.states, dim=0)).detach().to(self.device) 
+
+        old_states = torch.squeeze(torch.stack(self.states, dim=0)).detach().to(self.device)
         old_actions = torch.squeeze(torch.stack(self.actions, dim=0)).detach().to(self.device)
         old_logprobs = torch.squeeze(torch.stack(self.logprobs, dim=0)).detach().to(self.device)
         old_state_values = torch.squeeze(torch.stack(self.state_values, dim=0)).detach().to(self.device)
@@ -95,7 +115,6 @@ class PPOAgent:
         self.policy_old.load_state_dict(self.policy.state_dict())
 
     def learn(self):
-
         rewards = []
         discounted_reward = 0
         for reward, done in zip(reversed(self.rewards), reversed(self.dones)):
