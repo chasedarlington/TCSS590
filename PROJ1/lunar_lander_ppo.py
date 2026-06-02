@@ -168,4 +168,4 @@ class PPOAgent:
         self.policy.save_model(filepath)
 
     def load(self, filepath: str):
-        self.policy.load_model(filepath, self.device)
+        self.policy.load_model(filepath)
