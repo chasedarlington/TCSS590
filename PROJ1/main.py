@@ -1,32 +1,41 @@
+"""
+This is the project entry point.
+It creates the Gymnasium LunarLander environment,
+creates the PPO agent, trains the agent,
+saves the trained model, and closes the environment.
+"""
+
 import gymnasium as gym
 import torch
 from lunar_lander_ppo import PPOAgent
 
 def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Initialise the environment
-    env = gym.make("LunarLander-v3")  #, render_mode="human"
+    ## INITIALIZE THE ENVIRONMENT !!
+
+    env = gym.make("LunarLander-v2", render_mode="human")
+
+    ## CREATE THE AGENT !!      using env observation and action dimensions
 
     agent = PPOAgent(
-        state_size=env.observation_space.shape[0],
-        action_size=env.action_space.n,
-        device=device,
+        state_size = env.observation_space.shape[0],
+        action_size = env.action_space.n,
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     )
 
-    scores = agent.train_agent(
-        env,
-        num_episodes=2000,
-        max_t=1000,
-    )
+    scores = agent.train_agent(env)
 
     agent.save("ppo_lunar_lander.pt")
     env.close()
 
+    """
+    
     # Reset the environment to generate the first observation
     observation, info = env.reset(seed=42)
 
     # iterate for 1000 episodes
-    """
+
     for _ in range(1000):
         agent = PPOAgent(
             state_size = env.observation_space.shape[0] # 8?

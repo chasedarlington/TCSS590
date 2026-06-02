@@ -1,7 +1,7 @@
+###
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
 from torch.distributions import Categorical
 
 class Actor(nn.Module):
@@ -43,17 +43,21 @@ class AgentPPO(nn.Module):
         self.actor = Actor(state_dim , action_dim)
         self.critic = Critic(state_dim)
 
+    ## ACTOR NETWORK ---(STATE)--> ONE LOGIT PER DISCRETE ACTION
+    ## CRITIC NETWORK ---(STATE)--> BASELINE VALUE (FOR ADVANTAGE FXN)
     def act(self, state):
-        state = torch.as_tensor(state, device = self.device, dtype = torch.float32)
+        #state = torch.as_tensor(state, device = self.device, dtype = torch.float32)
         #state = torch.FloatTensor(state.cpu()).to(self.device)
-        action_logits = self.actor(state) # output of actor nn
+        action_logits = self.actor(state) ## output of actor nn
         #SoftMax = nn.Softmax(dim=-1)
-        #action_probs = SoftMax(action_logits)# outputs -> probabilities
-        #dist = Categorical(probs = action_probs)# distribution according to the probabilities
+        #action_probs = SoftMax(action_logits) ## outputs -> probabilities
+        #dist = Categorical(probs = action_probs) ## distribution according to the probabilities
         dist = Categorical(logits=action_logits)
-        selected_action = dist.sample()# random action sampling from the distribution
-        log_prob = dist.log_prob(selected_action)# log of the probability of the selected action (for calculating loss)
-        state_value = self.critic(state) # expected value of the current
+
+        selected_action = dist.sample() ## random action sampling from the distribution
+        log_prob = dist.log_prob(selected_action) ## log of the probability of the selected action (for calculating loss)
+        state_value = self.critic(state) ## expected value of the current
+
         return selected_action , log_prob, state_value
 
 
@@ -76,6 +80,6 @@ class AgentPPO(nn.Module):
         }, filepath)
 
     def load_model(self, filepath: str):
-        checkpoint = torch.load(filepath, map_location=self.device)
+        checkpoint = torch.load(filepath, map_location=self.device) #, map_location=self.device) or map_loc = "cpu"
         self.actor.load_state_dict(checkpoint['Actor_state_dict'])
         self.critic.load_state_dict(checkpoint['Critic_state_dict'])

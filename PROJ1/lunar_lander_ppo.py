@@ -1,10 +1,21 @@
-import Categorical
+"""
+This file defines the PPO training algorithm. It owns the PPOAgent class, which handles:
+
+PPO hyperparameters:
+ - actor/critic optimizer
+ - trajectory memory
+ - action selection
+ - reward/return computation
+ - PPO clipped policy update
+ - training loop
+ - model save/load wrappers
+"""
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from lunar_lander_models import AgentPPO
 
+## HYPERPARAMETERS !!
 TIMESTEP = 2048 #1000 # update policy every n timesteps
 EPOCHS = 10 # update policy for n epochs
 EPSILON = 0.2 # clip log prob ratio to 1 +/- epsilon (PPO clip parameter)
@@ -12,6 +23,8 @@ GAMMA = 0.99 # discount factor
 TAU = 1e-3 # for soft update of target parameters
 LR_ACTOR = 0.0005 # learning rate of the actor
 LR_CRITIC = 0.0005 # learning rate of the critic
+EPISODES = 2000
+MINI_BATCH_SIZE = 64 # 1000
 
 
 # CLASS: PPOAgent for discrete action spaces (e.g. LunarLander-v3)
@@ -58,13 +71,6 @@ class PPOAgent:
         del self.dones[:]
 
     def act(self, state):
-        action_logits = self.actor(state)
-        dist = Categorical(logits=action_logits)
-        selected_action = dist.sample()
-        log_prob = dist.log_prob(selected_action)
-        state_value = self.critic(state)
-        return selected_action, log_prob, state_value
-        """
         #return action given a state
         with torch.no_grad():
           state = torch.as_tensor(state, device=self.device, dtype=torch.float32)
@@ -74,8 +80,8 @@ class PPOAgent:
         self.actions.append(action)
         self.logprobs.append(action_logprob)
         self.state_values.append(state_val)
+
         return action.item()
-        """
 
     def evaluate(self, state, action):
         action_logits = self.actor(state)
@@ -129,7 +135,7 @@ class PPOAgent:
         self.update(rewards)
         self.empty_lists()
 
-    def train_agent(self, env, num_episodes = 2000, max_t = 600):
+    def train_agent(self, env, num_episodes=EPISODES, batch_size=MINI_BATCH_SIZE):
         time_step = 0
         i_episode = 1
         scores = []
@@ -137,7 +143,7 @@ class PPOAgent:
         for i_episode in range(1, num_episodes+1):
             state = env.reset()[0]
             current_ep_reward = 0
-            for t in range(1, max_t+1):
+            for t in range(1, batch_size+1):
                 action = self.act(state)
                 state, reward, terminated , truncated, _ = env.step(action)
                 done = terminated or truncated
@@ -162,4 +168,4 @@ class PPOAgent:
         self.policy.save_model(filepath)
 
     def load(self, filepath: str):
-        self.policy.load_model(filepath)
+        self.policy.load_model(filepath, self.device)
