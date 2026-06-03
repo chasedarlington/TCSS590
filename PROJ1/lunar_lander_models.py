@@ -80,8 +80,3 @@ class AgentPPO(nn.Module):
             'Actor_state_dict': self.actor.state_dict(),
             'Critic_state_dict': self.critic.state_dict(),
         }, filepath)
-
-    def load_model(self, filepath: str):
-        checkpoint = torch.load(filepath, map_location=self.device) #, map_location=self.device) or map_loc = "cpu"
-        self.actor.load_state_dict(checkpoint['Actor_state_dict'])
-        self.critic.load_state_dict(checkpoint['Critic_state_dict'])

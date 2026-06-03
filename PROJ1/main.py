@@ -6,7 +6,6 @@ saves the trained model, and closes the environment.
 """
 
 import gymnasium as gym
-import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from matplotlib import pyplot as plt
@@ -14,9 +13,9 @@ from matplotlib import pyplot as plt
 from lunar_lander_ppo import PPOAgent
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ## INITIALIZE THE ENVIRONMENT !!
+
     writer = SummaryWriter(log_dir="runs/ppo_lunar_lander")
     env = gym.make("LunarLander-v2")
 
@@ -28,7 +27,12 @@ def main():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     )
 
-    scores = agent.train_agent(env, writer)
+    ## TRAIN THE AGENT !!
+
+    scores = agent.train_agent(env=env, writer=writer)
+
+    ## PLOT SCORES !!
+
     plt.plot(scores)
     plt.xlabel("Episode")
     plt.ylabel("Reward")
@@ -94,12 +98,12 @@ def render(model_path="ppo_lunar_lander.pt", episodes=5):
             )
 
             ## STOCHASTIC SAMPLING !!
-            """
-            with torch.no_grad():
-                action_logits = agent.policy.actor(state_tensor)               
-                dist = torch.distributions.Categorical(logits=action_logits)
-                action = dist.sample().item()
-            """
+
+            #with torch.no_grad():
+            #    action_logits = agent.policy.actor(state_tensor)
+            #    dist = torch.distributions.Categorical(logits=action_logits)
+            #    action = dist.sample().item()
+
 
             ## DETERMINISTIC SAMPLING !!
             with torch.no_grad():
@@ -120,10 +124,10 @@ def render(model_path="ppo_lunar_lander.pt", episodes=5):
 if __name__ == "__main__":
 
     ## CREATE THE AGENT AND TRAIN THE MODEL !!
-    main()
+    #main()
 
     ## RENDER PREVIOUSLY TRAINED AGENT !! (USE .PT FILE)
-    #render()
+    render()
 
 
     """ 

@@ -16,17 +16,16 @@ import numpy as np
 from lunar_lander_models import AgentPPO
 
 ## HYPERPARAMETERS !!
-TIMESTEP = 2048 #1000 # update policy every n timesteps
+TIMESTEP = 1000 # update policy every n timesteps
 EPOCHS = 10 # update policy for n epochs
 EPSILON = 0.2 # clip log prob ratio to 1 +/- epsilon (PPO clip parameter)
-GAMMA = 0.98 # discount factor
-TAU = 1e-3 # for soft update of target parameters
-LR_ACTOR = 0.0005 # learning rate of the actor
-LR_CRITIC = 0.0005 # learning rate of the critic
+GAMMA = 0.99 # discount factor
+LR_ACTOR = 0.0003 # learning rate of the actor
+LR_CRITIC = 0.001 # learning rate of the critic
 EPISODES = 2000
-EP_MAX_STEPS = 64 # 1000
-EP_REWARD_PENALTY = -0.03
-EP_TIMEOUT_PENALTY = -25.00
+EP_MAX_STEPS = 500
+EP_REWARD_PENALTY = -0.00001
+EP_TIMEOUT_PENALTY = -10.00
 
 
 # CLASS: PPOAgent for discrete action spaces (e.g. LunarLander-v3)
@@ -92,7 +91,13 @@ class PPOAgent:
         old_logprobs = torch.squeeze(torch.stack(self.logprobs, dim=0)).detach().to(self.device)
         old_state_values = torch.squeeze(torch.stack(self.state_values, dim=0)).detach().to(self.device)
 
+        ## COMPUTE ADVANTAGES !!
+
         advantages = rewards.detach() - old_state_values.detach()
+
+        ## NORMALIZE ADVANTAGES !!
+
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
 
         for _ in range(self.epochs):
 
@@ -125,7 +130,7 @@ class PPOAgent:
 
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-    def learn(self, writer):
+    def learn(self, writer=None, global_step=None):
         rewards = []
         discounted_reward = 0
         for reward, done in zip(reversed(self.rewards), reversed(self.dones)):
@@ -137,19 +142,20 @@ class PPOAgent:
         # Normalizing the rewards
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
-        self.update(rewards,writer)
+        self.update(rewards=rewards,writer=writer,global_step=global_step)
         self.empty_lists()
 
     def train_agent(self, env, num_episodes=EPISODES, max_steps=EP_MAX_STEPS, writer=None):
         time_step = 0
-        current_episode = 0
         episode_length = 0
         scores = []
 
         for current_episode in range(1, num_episodes+1):
             state = env.reset()[0]
             current_ep_reward = 0
-            for t in range(max_steps): # max steps per episode
+
+            for t in range(1, max_steps+1): # max steps per episode
+
                 action = self.act(state)
                 state, reward, terminated , truncated, _ = env.step(action)
                 reward += EP_REWARD_PENALTY # ADDING THIS PENALTY TO ENCOURAGE LANDING QUICKLY
@@ -164,12 +170,12 @@ class PPOAgent:
 
                 time_step +=1
                 current_ep_reward += reward
+                episode_length = t
 
                 if time_step % self.update_timestep == 0:
-                    self.learn(writer)
+                    self.learn(writer=writer,global_step=time_step)
 
                 if done:
-                    episode_length = t
                     break
 
             ## LOGGING !!
@@ -191,5 +197,3 @@ class PPOAgent:
     def save(self, filepath: str):
         self.policy.save_model(filepath)
 
-    def load(self, filepath: str):
-        self.policy.load_model(filepath)
