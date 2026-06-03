@@ -1,4 +1,5 @@
 import glob
+import html
 import os
 import subprocess
 import threading
@@ -8,13 +9,23 @@ from io import BytesIO
 
 from flask import Flask, Response, redirect, request, send_from_directory
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+PNG_DIR = os.path.join(BASE_DIR, "tensorboard_pngs")
+
 app = Flask(__name__)
 process = None
 play_process = None
+log_file_path = None
+play_log_file_path = None
 browser_env = None
 browser_state = None
 browser_action = 0
 browser_lock = threading.Lock()
+
+
+def rel(path):
+    return path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
 
 
 def slider(name, label, value, min_value, max_value, step):
@@ -26,8 +37,29 @@ def slider(name, label, value, min_value, max_value, step):
 
 
 def latest_file(pattern):
-    files = glob.glob(pattern)
-    return max(files, key=os.path.getmtime) if files else ""
+    files = glob.glob(rel(pattern))
+    return os.path.basename(max(files, key=os.path.getmtime)) if files else ""
+
+
+def latest_run_dir():
+    files = glob.glob(os.path.join(BASE_DIR, "runs", "*"))
+    return os.path.relpath(max(files, key=os.path.getmtime), BASE_DIR) if files else "runs/ppo_lunar_lander"
+
+
+def read_log(path, max_chars=30000):
+    if not path:
+        return "No console output yet."
+    try:
+        with open(path, "r", errors="replace") as f:
+            content = f.read()
+        return content[-max_chars:] if len(content) > max_chars else content
+    except FileNotFoundError:
+        return "Log file not found yet."
+
+
+def open_log(run_id, suffix="train"):
+    os.makedirs(LOG_DIR, exist_ok=True)
+    return os.path.join(LOG_DIR, f"{run_id}_{suffix}.log")
 
 
 @app.route("/")
@@ -35,12 +67,19 @@ def home():
     running = process is not None and process.poll() is None
     playing = play_process is not None and play_process.poll() is None
     latest_model = latest_file("*.pt") or "ppo_lunar_lander.pt"
-    latest_run = latest_file("runs/*") or "runs/ppo_lunar_lander"
+    latest_run = latest_run_dir()
 
     return f"""
     <html>
-    <body style="font-family: Arial; margin: 40px; max-width: 760px;">
+    <body style="font-family: Arial; margin: 40px; max-width: 900px;">
         <h1>LunarLander PPO Control Panel</h1>
+        <p>Training status: {"Training running" if running else "Training not running"}</p>
+        <p>External pygame play status: {"Play running" if playing else "Play not running"}</p>
+        <p><a href="/logs" target="_blank">Open full console output</a> | <a href="/status" target="_blank">Process status</a></p>
+
+        <h2>Live Console Output</h2>
+        <iframe src="/logs_embed" style="width: 100%; height: 280px; border: 1px solid #ccc; background: #111;"></iframe>
+
         <h2>Train PPO Agent</h2>
         <form action="/run" method="post">
             <label for="run_name">Run name:</label><br>
@@ -72,9 +111,7 @@ def home():
         </form>
 
         <h2>Play In Browser</h2>
-        <form action="/browser_play" method="post">
-            <button type="submit" style="font-size: 18px; padding: 10px 20px;">Launch External Keyboard Play Window</button>
-        </form>
+        <p><a href="/browser_play" style="font-size: 18px;">Open Browser Keyboard Play</a></p>
 
         <h2>Play Out of Browser (pygame)</h2>
         <form action="/play" method="post">
@@ -96,7 +133,7 @@ def home():
 
 @app.route("/run", methods=["POST"])
 def run():
-    global process
+    global process, log_file_path
     if process is not None and process.poll() is None:
         return redirect("/")
 
@@ -114,11 +151,17 @@ def run():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_id = f"{run_name}_{timestamp}"
-    log_dir = f"runs/{run_id}"
+    tensorboard_dir = f"runs/{run_id}"
     model_path = f"{run_id}.pt"
+    log_file_path = open_log(run_id, "train")
+    log_file = open(log_file_path, "w", buffering=1)
+
+    print(f"Starting training run {run_id}", file=log_file, flush=True)
+    print(f"TensorBoard log dir: {tensorboard_dir}", file=log_file, flush=True)
+    print(f"Model path: {model_path}", file=log_file, flush=True)
 
     process = subprocess.Popen([
-        "python", "single_file_version.py", "train",
+        "python", "-u", "single_file_version.py", "train",
         "--timestep", timestep,
         "--epochs", epochs,
         "--epsilon", epsilon,
@@ -129,9 +172,9 @@ def run():
         "--ep-max-steps", ep_max_steps,
         "--ep-reward-penalty", ep_reward_penalty,
         "--ep-timeout-penalty", ep_timeout_penalty,
-        "--log-dir", log_dir,
+        "--log-dir", tensorboard_dir,
         "--model", model_path,
-    ])
+    ], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True)
     return redirect("/")
 
 
@@ -145,10 +188,62 @@ def stop():
 
 @app.route("/play", methods=["POST"])
 def play():
-    global play_process
+    global play_process, play_log_file_path
     if play_process is None or play_process.poll() is not None:
-        play_process = subprocess.Popen(["python", "single_file_version.py", "play"])
+        run_id = datetime.now().strftime("play_%Y%m%d_%H%M%S")
+        play_log_file_path = open_log(run_id, "pygame")
+        log_file = open(play_log_file_path, "w", buffering=1)
+        play_process = subprocess.Popen(["python", "-u", "single_file_version.py", "play"], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True)
     return redirect("/")
+
+
+@app.route("/status")
+def status():
+    return {
+        "training_running": process is not None and process.poll() is None,
+        "training_returncode": None if process is None else process.poll(),
+        "play_running": play_process is not None and play_process.poll() is None,
+        "play_returncode": None if play_process is None else play_process.poll(),
+        "training_log": log_file_path,
+        "play_log": play_log_file_path,
+    }
+
+
+@app.route("/logs")
+def logs():
+    selected = request.args.get("which", "train")
+    path = play_log_file_path if selected == "play" else log_file_path
+    content = html.escape(read_log(path))
+    return f"""
+    <html>
+    <head><meta http-equiv="refresh" content="2"></head>
+    <body style="font-family: Arial; margin: 40px;">
+        <h1>Console Output</h1>
+        <p><a href="/">Back</a> | <a href="/logs?which=train">Training log</a> | <a href="/logs?which=play">Play log</a></p>
+        <pre style="background:#111;color:#eee;padding:20px;white-space:pre-wrap;min-height:500px;">{content}</pre>
+    </body>
+    </html>
+    """
+
+
+@app.route("/logs_embed")
+def logs_embed():
+    content = html.escape(read_log(log_file_path, max_chars=12000))
+    return f"""
+    <html>
+    <head><meta http-equiv="refresh" content="2"></head>
+    <body style="margin:0;background:#111;color:#eee;font-family:monospace;">
+        <pre style="white-space:pre-wrap;margin:0;padding:12px;">{content}</pre>
+    </body>
+    </html>
+    """
+
+
+@app.route("/log_text")
+def log_text():
+    selected = request.args.get("which", "train")
+    path = play_log_file_path if selected == "play" else log_file_path
+    return Response(read_log(path), mimetype="text/plain")
 
 
 @app.route("/browser_play")
@@ -167,39 +262,11 @@ def browser_play():
         <script>
             const labels = {0: "0 no-op", 1: "1 left engine", 2: "2 main engine", 3: "3 right engine"};
             let currentAction = 0;
-
-            function sendAction(action) {
-                currentAction = action;
-                document.getElementById("action_label").innerText = labels[action];
-                fetch(`/browser_action?action=${action}`, {method: "POST"});
-            }
-
-            function resetGame() {
-                fetch("/browser_reset", {method: "POST"});
-                sendAction(0);
-            }
-
-            function keyToAction(key) {
-                key = key.toLowerCase();
-                if (key === "a") return 1;
-                if (key === "w") return 2;
-                if (key === "d") return 3;
-                if (key === "s") return 0;
-                return currentAction;
-            }
-
-            document.addEventListener("keydown", function(event) {
-                if (["w", "a", "s", "d", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) event.preventDefault();
-                if (event.key === "ArrowLeft") sendAction(1);
-                else if (event.key === "ArrowUp") sendAction(2);
-                else if (event.key === "ArrowRight") sendAction(3);
-                else sendAction(keyToAction(event.key));
-            });
-
-            document.addEventListener("keyup", function(event) {
-                if (["w", "a", "d", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) sendAction(0);
-            });
-
+            function sendAction(action) { currentAction = action; document.getElementById("action_label").innerText = labels[action]; fetch(`/browser_action?action=${action}`, {method: "POST"}); }
+            function resetGame() { fetch("/browser_reset", {method: "POST"}); sendAction(0); }
+            function keyToAction(key) { key = key.toLowerCase(); if (key === "a") return 1; if (key === "w") return 2; if (key === "d") return 3; if (key === "s") return 0; return currentAction; }
+            document.addEventListener("keydown", function(event) { if (["w", "a", "s", "d", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) event.preventDefault(); if (event.key === "ArrowLeft") sendAction(1); else if (event.key === "ArrowUp") sendAction(2); else if (event.key === "ArrowRight") sendAction(3); else sendAction(keyToAction(event.key)); });
+            document.addEventListener("keyup", function(event) { if (["w", "a", "d", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) sendAction(0); });
             window.onload = function() { document.getElementById("game").focus(); };
         </script>
     </body>
@@ -276,9 +343,9 @@ def render_page():
     <html>
     <body style="font-family: Arial; margin: 40px;">
         <h1>LunarLander Browser Render</h1>
-        <p>Model: <code>{model}</code></p>
+        <p>Model: <code>{html.escape(model)}</code></p>
         <p><a href="/">Back</a></p>
-        <img src="/render_stream?model={model}&episodes={episodes}" style="border: 1px solid #ccc; max-width: 100%;">
+        <img src="/render_stream?model={html.escape(model)}&episodes={episodes}" style="border: 1px solid #ccc; max-width: 100%;">
     </body>
     </html>
     """
@@ -292,7 +359,7 @@ def render_frames(model_path, episodes):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = gym.make("LunarLander-v2", render_mode="rgb_array")
     agent = PPOAgent(env.observation_space.shape[0], env.action_space.n, device)
-    agent.load(model_path)
+    agent.load(rel(model_path))
     agent.policy.eval()
 
     try:
@@ -316,22 +383,26 @@ def render_frames(model_path, episodes):
 def render_stream():
     model = request.args.get("model", latest_file("*.pt") or "ppo_lunar_lander.pt")
     episodes = request.args.get("episodes", "3")
-    if not os.path.exists(model):
+    if not os.path.exists(rel(model)):
         return f"Model not found: {model}", 404
     return Response(render_frames(model, episodes), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/export", methods=["POST"])
 def export():
+    global log_file_path
     log_dir = request.form.get("log_dir", "runs/ppo_lunar_lander")
-    subprocess.run(["python", "single_file_version.py", "export", "--log-dir", log_dir], check=False)
+    run_id = datetime.now().strftime("export_%Y%m%d_%H%M%S")
+    log_file_path = open_log(run_id, "export")
+    with open(log_file_path, "w", buffering=1) as log_file:
+        subprocess.run(["python", "-u", "single_file_version.py", "export", "--log-dir", log_dir], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True, check=False)
     return redirect("/exports")
 
 
 @app.route("/exports")
 def exports():
-    os.makedirs("tensorboard_pngs", exist_ok=True)
-    images = sorted(glob.glob("tensorboard_pngs/*.png"))
+    os.makedirs(PNG_DIR, exist_ok=True)
+    images = sorted(glob.glob(os.path.join(PNG_DIR, "*.png")))
     cards = "".join(
         f"<h3>{os.path.basename(img)}</h3><img src='/export_file/{os.path.basename(img)}' style='max-width: 720px; border: 1px solid #ccc;'><br><br>"
         for img in images
@@ -340,7 +411,7 @@ def exports():
     <html>
     <body style="font-family: Arial; margin: 40px;">
         <h1>Exported TensorBoard PNGs</h1>
-        <p><a href="/">Back</a></p>
+        <p><a href="/">Back</a> | <a href="/logs">View export console output</a></p>
         {cards}
     </body>
     </html>
@@ -349,7 +420,7 @@ def exports():
 
 @app.route("/export_file/<path:filename>")
 def export_file(filename):
-    return send_from_directory("tensorboard_pngs", filename)
+    return send_from_directory(PNG_DIR, filename)
 
 
 if __name__ == "__main__":
