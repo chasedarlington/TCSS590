@@ -52,8 +52,9 @@ class AgentPPO(nn.Module):
         #SoftMax = nn.Softmax(dim=-1)
         #action_probs = SoftMax(action_logits) ## outputs -> probabilities
         #dist = Categorical(probs = action_probs) ## distribution according to the probabilities
-        dist = Categorical(logits=action_logits)
 
+        ## STOCHASTIC ACTION SELECTION !!
+        dist = Categorical(logits=action_logits)
         selected_action = dist.sample() ## random action sampling from the distribution
         log_prob = dist.log_prob(selected_action) ## log of the probability of the selected action (for calculating loss)
         state_value = self.critic(state) ## expected value of the current
@@ -67,6 +68,7 @@ class AgentPPO(nn.Module):
         # SoftMax = nn.Softmax(dim=-1)
         #action_probs = SoftMax(action_logits)# outputs -> probabilities
         #dist = Categorical(probs = action_probs)# discrete distribution from the probabilities
+
         dist = Categorical(logits = action_logits)
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()

@@ -19,12 +19,14 @@ from lunar_lander_models import AgentPPO
 TIMESTEP = 2048 #1000 # update policy every n timesteps
 EPOCHS = 10 # update policy for n epochs
 EPSILON = 0.2 # clip log prob ratio to 1 +/- epsilon (PPO clip parameter)
-GAMMA = 0.99 # discount factor
+GAMMA = 0.98 # discount factor
 TAU = 1e-3 # for soft update of target parameters
 LR_ACTOR = 0.0005 # learning rate of the actor
 LR_CRITIC = 0.0005 # learning rate of the critic
 EPISODES = 2000
-MINI_BATCH_SIZE = 64 # 1000
+EP_MAX_STEPS = 64 # 1000
+EP_REWARD_PENALTY = -0.03
+EP_TIMEOUT_PENALTY = -25.00
 
 
 # CLASS: PPOAgent for discrete action spaces (e.g. LunarLander-v3)
@@ -74,7 +76,7 @@ class PPOAgent:
         #return action given a state
         with torch.no_grad():
           state = torch.as_tensor(state, device=self.device, dtype=torch.float32)
-          action,action_logprob,state_val = self.policy_old.act(state)
+          action,action_logprob,state_val = self.policy_old.act(state) # STOCHASTIC ACTION SELECTION
 
         self.states.append(state)
         self.actions.append(action)
@@ -83,15 +85,7 @@ class PPOAgent:
 
         return action.item()
 
-    def evaluate(self, state, action):
-        action_logits = self.actor(state)
-        dist = Categorical(logits=action_logits)
-        action_logprobs = dist.log_prob(action)
-        dist_entropy = dist.entropy()
-        state_values = self.critic(state)
-        return action_logprobs, state_values, dist_entropy
-
-    def update(self , rewards, writer=None): # detach() to prevent backpropagation through old policy's states/actions/logprobs/state_values
+    def update(self , rewards, writer=None, global_step=None): # detach() to prevent backpropagation through old policy's states/actions/logprobs/state_values
 
         old_states = torch.squeeze(torch.stack(self.states, dim=0)).detach().to(self.device)
         old_actions = torch.squeeze(torch.stack(self.actions, dim=0)).detach().to(self.device)
@@ -127,7 +121,7 @@ class PPOAgent:
                 writer.add_scalar("Loss/Total", loss.mean().item(), global_step)
                 writer.add_scalar("Loss/Actor", actor_loss.mean().item(), global_step)
                 writer.add_scalar("Loss/Critic", critic_loss.item(), global_step)
-                writer.add_scalar("Policy/Entropy", entropy_bonus.mean().item(), global_step)
+                writer.add_scalar("Policy/Entropy", dist_entropy.mean().item(), global_step)
 
         self.policy_old.load_state_dict(self.policy.state_dict())
 
@@ -146,39 +140,51 @@ class PPOAgent:
         self.update(rewards,writer)
         self.empty_lists()
 
-    def train_agent(self, env, num_episodes=EPISODES, batch_size=MINI_BATCH_SIZE, writer=None):
+    def train_agent(self, env, num_episodes=EPISODES, max_steps=EP_MAX_STEPS, writer=None):
         time_step = 0
+        current_episode = 0
+        episode_length = 0
         scores = []
 
-        for i_episode in range(1, num_episodes+1):
+        for current_episode in range(1, num_episodes+1):
             state = env.reset()[0]
             current_ep_reward = 0
-            for t in range(1, batch_size+1):
+            for t in range(max_steps): # max steps per episode
                 action = self.act(state)
                 state, reward, terminated , truncated, _ = env.step(action)
+                reward += EP_REWARD_PENALTY # ADDING THIS PENALTY TO ENCOURAGE LANDING QUICKLY
                 done = terminated or truncated
+
+                if t == max_steps and not done:
+                    reward += EP_TIMEOUT_PENALTY
+                    done = True
+
                 self.rewards.append(reward)
                 self.dones.append(done)
+
                 time_step +=1
                 current_ep_reward += reward
+
                 if time_step % self.update_timestep == 0:
                     self.learn(writer)
+
                 if done:
+                    episode_length = t
                     break
 
             ## LOGGING !!
             scores.append(current_ep_reward)
             avg_score_100 = np.mean(scores[-100:])
             if writer is not None:
-                writer.add_scalar("Train/Episode_Return", current_ep_reward, i_episode)
-                writer.add_scalar("Train/Average_Return_100", avg_score_100, i_episode)
-                writer.add_scalar("Train/Episode_Length", t, i_episode)
-                writer.add_scalar("Train/Total_Timesteps", time_step, i_episode)
-            print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores[-100:])), end="")
-            if i_episode % 100 == 0:
-                print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores[-100:])))
+                writer.add_scalar("Train/Episode_Return", current_ep_reward, current_episode)
+                writer.add_scalar("Train/Average_Return_100", avg_score_100, current_episode)
+                writer.add_scalar("Train/Episode_Length", episode_length, current_episode)
+                writer.add_scalar("Train/Total_Timesteps", time_step, current_episode)
+            print('\rEpisode {}\tAverage Score: {:.2f}'.format(current_episode, np.mean(scores[-100:])), end="")
+            if current_episode % 100 == 0:
+                print('\rEpisode {}\tAverage Score: {:.2f}'.format(current_episode, np.mean(scores[-100:])))
             if np.mean(scores[-100:]) >= 200.0:
-                print('\nEnvironment solved in {:d} episodes!\tAverage Score: {:.2f}'.format(i_episode,np.mean(scores[-100:])))
+                print('\nEnvironment solved in {:d} episodes!\tAverage Score: {:.2f}'.format(current_episode,np.mean(scores[-100:])))
                 break
         return scores
 

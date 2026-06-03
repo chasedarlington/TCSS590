@@ -93,11 +93,18 @@ def render(model_path="ppo_lunar_lander.pt", episodes=5):
                 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
             )
 
+            ## STOCHASTIC SAMPLING !!
+            """
             with torch.no_grad():
-                action_logits = agent.policy.actor(state_tensor)
-
+                action_logits = agent.policy.actor(state_tensor)               
                 dist = torch.distributions.Categorical(logits=action_logits)
                 action = dist.sample().item()
+            """
+
+            ## DETERMINISTIC SAMPLING !!
+            with torch.no_grad():
+                action_logits = agent.policy.actor(state_tensor)
+                action = torch.argmax(action_logits).item()
 
             state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
@@ -113,10 +120,10 @@ def render(model_path="ppo_lunar_lander.pt", episodes=5):
 if __name__ == "__main__":
 
     ## CREATE THE AGENT AND TRAIN THE MODEL !!
-    #main()
+    main()
 
     ## RENDER PREVIOUSLY TRAINED AGENT !! (USE .PT FILE)
-    render()
+    #render()
 
 
     """ 
