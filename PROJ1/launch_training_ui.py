@@ -1,6 +1,8 @@
 import glob
 import os
 import subprocess
+import threading
+import time
 from datetime import datetime
 from io import BytesIO
 
@@ -9,6 +11,10 @@ from flask import Flask, Response, redirect, request, send_from_directory
 app = Flask(__name__)
 process = None
 play_process = None
+browser_env = None
+browser_state = None
+browser_action = 0
+browser_lock = threading.Lock()
 
 
 def slider(name, label, value, min_value, max_value, step):
@@ -36,7 +42,7 @@ def home():
     <body style="font-family: Arial; margin: 40px; max-width: 760px;">
         <h1>LunarLander PPO Control Panel</h1>
         <p>Training status: {"Training running" if running else "Training not running"}</p>
-        <p>Play status: {"Play running" if playing else "Play not running"}</p>
+        <p>External pygame play status: {"Play running" if playing else "Play not running"}</p>
 
         <h2>Train</h2>
         <form action="/run" method="post">
@@ -68,9 +74,13 @@ def home():
             <button type="submit" style="font-size: 18px; padding: 10px 20px;">Open Browser Render</button>
         </form>
 
-        <h2>Play manually</h2>
+        <h2>Play manually in browser</h2>
+        <p>Controls: W = main engine, A = left engine, D = right engine, S or key release = no-op.</p>
+        <p><a href="/browser_play" style="font-size: 18px;">Open Browser Keyboard Play</a></p>
+
+        <h2>Optional external pygame play window</h2>
         <form action="/play" method="post">
-            <button type="submit" style="font-size: 18px; padding: 10px 20px;">Launch Keyboard Play Window</button>
+            <button type="submit" style="font-size: 18px; padding: 10px 20px;">Launch External Keyboard Play Window</button>
         </form>
 
         <h2>Export TensorBoard PNGs</h2>
@@ -143,6 +153,123 @@ def play():
     return redirect("/")
 
 
+@app.route("/browser_play")
+def browser_play():
+    return """
+    <html>
+    <body style="font-family: Arial; margin: 40px;">
+        <h1>LunarLander Browser Keyboard Play</h1>
+        <p><a href="/">Back</a></p>
+        <p>Click the game image first. Controls: W = main engine, A = left engine, D = right engine, S/no key = do nothing.</p>
+        <p>Discrete LunarLander only accepts one action at a time, so combined keys like W+A are not separate actions.</p>
+        <button onclick="resetGame()" style="font-size: 18px; padding: 8px 18px;">Reset Episode</button>
+        <p>Current action: <span id="action_label">0</span></p>
+        <img id="game" tabindex="0" src="/browser_play_stream" style="border: 1px solid #ccc; max-width: 100%; outline: none;" autofocus>
+
+        <script>
+            const labels = {0: "0 no-op", 1: "1 left engine", 2: "2 main engine", 3: "3 right engine"};
+            let currentAction = 0;
+
+            function sendAction(action) {
+                currentAction = action;
+                document.getElementById("action_label").innerText = labels[action];
+                fetch(`/browser_action?action=${action}`, {method: "POST"});
+            }
+
+            function resetGame() {
+                fetch("/browser_reset", {method: "POST"});
+                sendAction(0);
+            }
+
+            function keyToAction(key) {
+                key = key.toLowerCase();
+                if (key === "a") return 1;
+                if (key === "w") return 2;
+                if (key === "d") return 3;
+                if (key === "s") return 0;
+                return currentAction;
+            }
+
+            document.addEventListener("keydown", function(event) {
+                if (["w", "a", "s", "d", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) event.preventDefault();
+                if (event.key === "ArrowLeft") sendAction(1);
+                else if (event.key === "ArrowUp") sendAction(2);
+                else if (event.key === "ArrowRight") sendAction(3);
+                else sendAction(keyToAction(event.key));
+            });
+
+            document.addEventListener("keyup", function(event) {
+                if (["w", "a", "d", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) sendAction(0);
+            });
+
+            window.onload = function() { document.getElementById("game").focus(); };
+        </script>
+    </body>
+    </html>
+    """
+
+
+def ensure_browser_env():
+    global browser_env, browser_state
+    import gymnasium as gym
+    if browser_env is None:
+        browser_env = gym.make("LunarLander-v2", render_mode="rgb_array")
+        browser_state, _ = browser_env.reset()
+
+
+def encode_frame(frame):
+    from PIL import Image
+    image = Image.fromarray(frame)
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return buffer.getvalue()
+
+
+def browser_play_frames():
+    global browser_state, browser_action
+    ensure_browser_env()
+    while True:
+        with browser_lock:
+            frame = browser_env.render()
+            action = browser_action
+            browser_state, _, terminated, truncated, _ = browser_env.step(action)
+            if terminated or truncated:
+                browser_state, _ = browser_env.reset()
+                browser_action = 0
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + encode_frame(frame) + b"\r\n"
+        time.sleep(1 / 30)
+
+
+@app.route("/browser_play_stream")
+def browser_play_stream():
+    return Response(browser_play_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/browser_action", methods=["POST"])
+def browser_action_route():
+    global browser_action
+    action = request.args.get("action", "0")
+    try:
+        action = int(action)
+    except ValueError:
+        action = 0
+    if action not in {0, 1, 2, 3}:
+        action = 0
+    with browser_lock:
+        browser_action = action
+    return {"action": action}
+
+
+@app.route("/browser_reset", methods=["POST"])
+def browser_reset():
+    global browser_state, browser_action
+    ensure_browser_env()
+    with browser_lock:
+        browser_state, _ = browser_env.reset()
+        browser_action = 0
+    return {"reset": True}
+
+
 @app.route("/render")
 def render_page():
     model = request.args.get("model", latest_file("*.pt") or "ppo_lunar_lander.pt")
@@ -162,7 +289,6 @@ def render_page():
 def render_frames(model_path, episodes):
     import gymnasium as gym
     import torch
-    from PIL import Image
     from single_file_version import PPOAgent
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -177,16 +303,13 @@ def render_frames(model_path, episodes):
             done = False
             while not done:
                 frame = env.render()
-                image = Image.fromarray(frame)
-                buffer = BytesIO()
-                image.save(buffer, format="JPEG")
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buffer.getvalue() + b"\r\n"
-
+                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + encode_frame(frame) + b"\r\n"
                 state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device)
                 with torch.no_grad():
                     action = torch.argmax(agent.policy.actor(state_tensor)).item()
                 state, _, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated
+                time.sleep(1 / 30)
     finally:
         env.close()
 
@@ -232,4 +355,4 @@ def export_file(filename):
 
 
 if __name__ == "__main__":
-    app.run(port=5000)
+    app.run(port=5000, threaded=True)
