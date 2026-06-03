@@ -6,51 +6,48 @@ app = Flask(__name__)
 process = None
 
 
+def slider(name, label, value, min_value, max_value, step):
+    return f"""
+        <label for="{name}">{label}: <span id="{name}_value">{value}</span></label><br>
+        <input
+            id="{name}"
+            name="{name}"
+            type="range"
+            min="{min_value}"
+            max="{max_value}"
+            step="{step}"
+            value="{value}"
+            oninput="document.getElementById('{name}_value').innerText = this.value"
+            style="width: 420px;"
+        ><br><br>
+    """
+
+
 @app.route("/")
 def home():
     running = process is not None and process.poll() is None
 
     return f"""
     <html>
-    <body style="font-family: Arial; margin: 40px;">
+    <body style="font-family: Arial; margin: 40px; max-width: 700px;">
         <h1>LunarLander PPO Control Panel</h1>
 
         <p>Status: {"Training running" if running else "Training not running"}</p>
 
         <form action="/run" method="post">
-            
-            <label>Run name:</label><br>
-            <input name="run_name" type="text" value="ppo_lunar_lander"><br><br>
-                                    
-            <label>Timestep:</label><br>
-            <input name="timestep" type="number" value="2048"><br><br>
-            
-            <label>PPO epochs:</label><br>
-            <input name="epochs" type="number" value="10"><br><br>
-            
-            <label>Epsilon:</label><br>
-            <input name="epsilon" type="number" step="0.01" value="0.2"><br><br>
-            
-            <label>Gamma:</label><br>
-            <input name="gamma" type="number" step="0.01" value="0.99"><br><br>
-            
-            <label>Actor Learning Rate:</label><br>
-            <input name="lr_actor" type="number" step="0.0001" value="0.0003"><br><br>
-            
-            <label>Critic Learning Rate:</label><br>
-            <input name="lr_critic" type="number" step="0.0001" value="0.001"><br><br>
-            
-            <label>Episodes:</label><br>
-            <input name="episodes" type="number" value="2000"><br><br>
-            
-            <label>Maximum Steps per Episode:</label><br>
-            <input name="ep_max_steps" type="number" value="1000"><br><br>
-            
-            <label>Reward Penalty per Timestep:</label><br>
-            <input name="ep_reward_penalty" type="number" step="0.01" value="-0.01"><br><br>
-            
-            <label>Timeout Penalty (exceeding max steps per episode):</label><br>
-            <input name="ep_timeout_penalty" type="number" step="1" value="-25.0"><br><br>
+            <label for="run_name">Run name:</label><br>
+            <input id="run_name" name="run_name" type="text" value="ppo_lunar_lander" style="width: 420px;"><br><br>
+
+            {slider("timestep", "Update timestep", "2048", "256", "8192", "256")}
+            {slider("epochs", "PPO epochs", "10", "1", "30", "1")}
+            {slider("epsilon", "PPO clip epsilon", "0.2", "0.05", "0.5", "0.01")}
+            {slider("gamma", "Discount gamma", "0.99", "0.90", "0.999", "0.001")}
+            {slider("lr_actor", "Actor learning rate", "0.0003", "0.0001", "0.005", "0.0001")}
+            {slider("lr_critic", "Critic learning rate", "0.001", "0.0001", "0.005", "0.0001")}
+            {slider("episodes", "Training episodes", "2000", "100", "10000", "100")}
+            {slider("ep_max_steps", "Max episode steps", "1000", "100", "2000", "100")}
+            {slider("ep_reward_penalty", "Per-step reward penalty", "-0.01", "-0.20", "0", "0.01")}
+            {slider("ep_timeout_penalty", "Timeout penalty", "-25.0", "-200", "0", "5")}
 
             <button type="submit" style="font-size: 20px; padding: 10px 20px;">
                 Run Training
