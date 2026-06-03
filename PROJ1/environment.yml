@@ -16,4 +16,5 @@ dependencies:
       - "setuptools<81"
       - tensorboard
       - flask
+      - pillow
 

@@ -135,7 +135,7 @@ def render(episodes=5,model_path=MODEL_PATH):
 def play():
     from gymnasium.utils.play import play
     env=gym.make("LunarLander-v2",render_mode="rgb_array")
-    play(env,keys_to_action={"args":1,"w":2,"d":3,"s":0,"":0},noop=0,fps=30); env.close()
+    play(env,keys_to_action={"a":1,"w":2,"d":3,"s":0,"":0},noop=0,fps=30); env.close()
 
 def export_pngs(log_dir="runs/ppo_lunar_lander",out_dir="tensorboard_pngs"):
     from pathlib import Path
