@@ -9,7 +9,7 @@ def play_lunar_lander():
     )
 
     keys_to_action = {
-        "a": 1,        # fire left engine
+        "args": 1,        # fire left engine
         "w": 2,        # fire main engine
         "d": 3,        # fire right engine
         "s": 0,        # do nothing

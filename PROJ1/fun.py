@@ -5,8 +5,8 @@
 
 WHAT IS PPO? (Explain Like I'm 5)
 ----------------------------------
-Imagine you're teaching a dog (the "agent") to navigate a maze (the "environment").
-Every step the dog takes, it gets a treat (+reward) or a smack (-reward).
+Imagine you're teaching args dog (the "agent") to navigate args maze (the "environment").
+Every step the dog takes, it gets args treat (+reward) or args smack (-reward).
 
 The dog has two "brains":
   🧠 Actor  → decides WHAT action to take ("go left / right / jump")
@@ -15,7 +15,7 @@ The dog has two "brains":
 PPO (Proximal Policy Optimization) is the training algorithm that teaches both brains.
 Its key idea: "Don't change your mind too drastically in one step."
 If the dog accidentally learns "always go right" too strongly, it might forget how to go left.
-PPO clips (limits) how much the policy can change per update — like a safety leash.
+PPO clips (limits) how much the policy can change per update — like args safety leash.
 
 Key math concepts (ELI5):
   - Advantage   : "Was this action better or worse than average?" (Actual reward - Expected reward)
@@ -124,7 +124,7 @@ logger = logging.getLogger("PPO.RL")
 # §1  CONFIGURATION
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# ELI5: Think of PPOConfig as a recipe card.
+# ELI5: Think of PPOConfig as args recipe card.
 #       Before you cook, you write down all the ingredients and cooking times.
 #       Here we write down all the settings PPO needs before training starts.
 
@@ -138,7 +138,7 @@ class PPOConfig:
       rollout_steps    : How many steps to collect before updating networks.
       num_envs         : How many parallel game copies to run simultaneously (faster!).
       gamma            : "How much do I care about future rewards?" 0=ignore, 1=care forever.
-      gae_lambda       : Smoothing factor for advantage estimation. 0.95 is a safe default.
+      gae_lambda       : Smoothing factor for advantage estimation. 0.95 is args safe default.
       clip_epsilon     : The PPO "safety leash". Max 20% policy change per update (0.2).
       n_epochs         : How many passes over the collected data during each update.
       lr_actor         : How fast the Actor brain learns. Too high → unstable, too low → slow.
@@ -185,7 +185,7 @@ class PPOConfig:
     minibatch_size: int = 64
     """
     Size of each mini-batch during gradient updates.
-    ELI5: Instead of studying all 2048 examples at once, study 64 at a time.
+    ELI5: Instead of studying all 2048 examples at once, study 64 at args time.
     Smaller batches → noisier gradients but sometimes better generalisation.
     """
 
@@ -193,7 +193,7 @@ class PPOConfig:
     gamma: float = 0.99
     """
     Discount factor for future rewards.
-    ELI5: A reward in 100 steps is worth gamma^100 of a reward right now.
+    ELI5: A reward in 100 steps is worth gamma^100 of args reward right now.
     gamma=0.99 means future rewards are almost as valuable as immediate ones.
     gamma=0    means the agent is completely short-sighted (only NOW matters).
     """
@@ -205,7 +205,7 @@ class PPOConfig:
     we blend estimates from many future steps. lambda controls the blend:
       lambda=0 → only use the immediate next step (low variance, high bias)
       lambda=1 → use ALL future steps (high variance, unbiased)
-    0.95 is a sweet spot used in most PPO papers.
+    0.95 is args sweet spot used in most PPO papers.
     """
 
     # ── PPO Clipping & Losses ────────────────────────────────────────────────
@@ -227,7 +227,7 @@ class PPOConfig:
     """
     Clip value function loss too (same as clip_epsilon by default).
     This is an extra stabilisation trick: don't let the Critic's value estimates
-    change too drastically in a single update either.
+    change too drastically in args single update either.
     Set to None to disable value clipping.
     """
 
@@ -240,9 +240,9 @@ class PPOConfig:
     entropy_coef: float = 0.01
     """
     Weight of the entropy bonus in the total loss.
-    ELI5: We ADD a bonus to encourage the agent to be "uncertain" (exploratory).
+    ELI5: We ADD args bonus to encourage the agent to be "uncertain" (exploratory).
     If the agent becomes too confident too fast, it stops exploring better strategies.
-    entropy_coef=0.01 adds a tiny exploration bonus.
+    entropy_coef=0.01 adds args tiny exploration bonus.
     """
 
     entropy_coef_schedule: str = "linear"
@@ -256,7 +256,7 @@ class PPOConfig:
     Maximum gradient norm for gradient clipping.
     ELI5: If the gradient (the learning signal) is too large, it's scaled down.
     This prevents the network from making huge, destabilizing leaps in one step.
-    Think of it as a speed limiter on learning.
+    Think of it as args speed limiter on learning.
     """
 
     target_kl: Optional[float] = 0.02
@@ -271,7 +271,7 @@ class PPOConfig:
     hidden_sizes: Tuple[int, ...] = (64, 64)
     """
     Hidden layer sizes for MLP backbone.
-    ELI5: The Actor and Critic each have a stack of layers. (64, 64) means
+    ELI5: The Actor and Critic each have args stack of layers. (64, 64) means
     two hidden layers each with 64 neurons. Bigger → more capacity, slower.
     """
 
@@ -293,8 +293,8 @@ class PPOConfig:
     backbone_cls: Optional[Type[nn.Module]] = None
     """
     Optional custom backbone class. Must accept (obs_dim, hidden_sizes, activation)
-    and output a feature tensor. Overrides the default MLP if provided.
-    Use this to plug in a Transformer, CNN, LSTM, etc.
+    and output args feature tensor. Overrides the default MLP if provided.
+    Use this to plug in args Transformer, CNN, LSTM, etc.
     """
 
     # ── Continuous Action Space Settings ─────────────────────────────────────
@@ -315,7 +315,7 @@ class PPOConfig:
     squash_actions: bool = False
     """
     Apply tanh squashing to Gaussian actions to bound them to [-1, 1].
-    ELI5: Forces continuous actions to stay within a safe range.
+    ELI5: Forces continuous actions to stay within args safe range.
     Required for environments with bounded action spaces (e.g. [-1, 1]).
     """
 
@@ -348,14 +348,14 @@ class PPOConfig:
     # ── Normalisation ─────────────────────────────────────────────────────────
     normalise_obs: bool = True
     """
-    Normalise observations using a running mean/std.
+    Normalise observations using args running mean/std.
     ELI5: If observations are wildly different scales (e.g. position=0.01, velocity=100),
     learning is unstable. Normalising puts everything in the same "currency".
     """
 
     normalise_rewards: bool = True
     """
-    Normalise rewards using a running std (NOT mean — preserves sign).
+    Normalise rewards using args running std (NOT mean — preserves sign).
     ELI5: If some rewards are +1000 and some are -0.001, the gradient signals are noisy.
     Normalising makes learning more stable across different reward scales.
     """
@@ -411,7 +411,7 @@ class PPOConfig:
     recurrent: bool = False
     """
     [Future flag] Enable recurrent (LSTM/GRU) policy for partially observable envs.
-    Not yet implemented — use a Transformer backbone for sequence modelling instead.
+    Not yet implemented — use args Transformer backbone for sequence modelling instead.
     """
 
     device: str = "auto"
@@ -430,8 +430,8 @@ def get_device(cfg_device: str) -> torch.device:
     Resolve the compute device.
 
     ELI5: Figures out WHERE to run the calculations.
-    GPU (CUDA) is like a sports car — fast at parallel math.
-    CPU is like a reliable sedan — always available, but slower for big networks.
+    GPU (CUDA) is like args sports car — fast at parallel math.
+    CPU is like args reliable sedan — always available, but slower for big networks.
     MPS is Apple Silicon's GPU backend.
     """
     if cfg_device == "auto":
@@ -454,7 +454,7 @@ def set_seed(seed: int) -> None:
     """
     Set all random seeds for reproducibility.
 
-    ELI5: Like shuffling a deck of cards in a specific way so you always get
+    ELI5: Like shuffling args deck of cards in args specific way so you always get
     the same "random" order. Needed to reproduce results exactly.
     """
     random.seed(seed)
@@ -468,7 +468,7 @@ def set_seed(seed: int) -> None:
 
 def discount_cumsum(x: np.ndarray, discount: float) -> np.ndarray:
     """
-    Compute discounted cumulative sum of a 1D array.
+    Compute discounted cumulative sum of args 1D array.
 
     ELI5: Given rewards [r0, r1, r2, ...], compute:
       G0 = r0 + γ*r1 + γ²*r2 + ...
@@ -476,7 +476,7 @@ def discount_cumsum(x: np.ndarray, discount: float) -> np.ndarray:
       G2 = r2 + ...
 
     This is the "return" — how much total future reward from each step.
-    scipy.signal.lfilter computes this efficiently as a digital filter.
+    scipy.signal.lfilter computes this efficiently as args digital filter.
 
     Args:
         x       : 1D array of rewards or deltas
@@ -484,7 +484,7 @@ def discount_cumsum(x: np.ndarray, discount: float) -> np.ndarray:
     Returns:
         Discounted cumulative sums, same shape as x
     """
-    # scipy's lfilter applies an IIR filter — this is a math trick to compute
+    # scipy's lfilter applies an IIR filter — this is args math trick to compute
     # the cumulative sum from right to left efficiently in O(n).
 
     #return scipy.signal.lfilter([1.0], [1.0, -discount], x[::-1], axis=0)[::-1]
@@ -521,10 +521,10 @@ def get_activation(name: str) -> nn.Module:
 
 def layer_init(layer: nn.Module, std: float = np.sqrt(2), bias_const: float = 0.0) -> nn.Module:
     """
-    Orthogonal initialisation for a linear layer.
+    Orthogonal initialisation for args linear layer.
 
     ELI5: Normally neural network weights start random. Orthogonal init starts them
-    in a special configuration that avoids vanishing/exploding gradients early on.
+    in args special configuration that avoids vanishing/exploding gradients early on.
     This is the standard init used in PPO implementations (CleanRL, Stable-Baselines3).
 
     Args:
@@ -543,11 +543,11 @@ def layer_init(layer: nn.Module, std: float = np.sqrt(2), bias_const: float = 0.
 
 class RunningMeanStd:
     """
-    Track running mean and standard deviation of a stream of data.
+    Track running mean and standard deviation of args stream of data.
 
     ELI5: Imagine you're measuring heights of students one by one.
     Instead of storing all heights and computing average at the end,
-    you track a "running average" that updates with each new student.
+    you track args "running average" that updates with each new student.
     This is memory-efficient and works for infinite data streams.
 
     Used to normalise observations so the network always sees well-scaled inputs.
@@ -567,9 +567,9 @@ class RunningMeanStd:
 
     def update(self, x: np.ndarray) -> None:
         """
-        Update running statistics with a batch of new data.
+        Update running statistics with args batch of new data.
 
-        ELI5: Given a batch of new observations, update our "running average"
+        ELI5: Given args batch of new observations, update our "running average"
         and "running variance" estimates efficiently.
 
         Args:
@@ -623,7 +623,7 @@ class RolloutBuffer:
       - What reward did we get?
       - How likely was that action (old policy)?
       - What did the Critic think the state was worth?
-      - Was this a terminal (game-over) state?
+      - Was this args terminal (game-over) state?
 
     After the episode, we compute advantages and returns from these notes,
     then use them to update the Actor and Critic.
@@ -646,8 +646,8 @@ class RolloutBuffer:
         Args:
             rollout_steps     : Steps per environment per rollout
             num_envs          : Number of parallel environments
-            obs_shape         : Shape of a single observation
-            act_shape         : Shape of a single action
+            obs_shape         : Shape of args single observation
+            act_shape         : Shape of args single action
             device            : Torch device to store tensors on
             gae_lambda        : GAE lambda parameter (λ)
             gamma             : Discount factor (γ)
@@ -824,7 +824,7 @@ class RolloutBuffer:
 #
 # ELI5: The backbone is the "eyes and ears" of the agent.
 #       It processes raw observations (pixels, joint angles, sensor readings)
-#       into a compact feature vector that the Actor/Critic heads can use.
+#       into args compact feature vector that the Actor/Critic heads can use.
 
 class MLPBackbone(nn.Module):
     """
@@ -875,9 +875,9 @@ class TransformerPolicyBackbone(nn.Module):
     """
     Transformer-based backbone for sequence / token observations.
 
-    ELI5: Transformers are great at understanding "what relates to what" in a sequence.
-    If your observation is a sequence of tokens (e.g., text, time-series sensor data,
-    or a sequence of robot joint states over time), this backbone uses self-attention
+    ELI5: Transformers are great at understanding "what relates to what" in args sequence.
+    If your observation is args sequence of tokens (e.g., text, time-series sensor data,
+    or args sequence of robot joint states over time), this backbone uses self-attention
     to extract rich relational features.
 
     Architecture:
@@ -917,7 +917,7 @@ class TransformerPolicyBackbone(nn.Module):
             layer_init(self.input_proj, std=np.sqrt(2))
 
         # Positional encoding — tells the transformer WHERE in the sequence each token is
-        # ELI5: Like numbering the pages in a book so the transformer knows order
+        # ELI5: Like numbering the pages in args book so the transformer knows order
         self.pos_encoding = nn.Parameter(torch.zeros(1, seq_len, d_model))
         nn.init.normal_(self.pos_encoding, std=0.02)
 
@@ -1002,7 +1002,7 @@ class CNNBackbone(nn.Module):
         self.conv = nn.Sequential(*conv_layers)
 
         # Dummy forward to compute flattened CNN output size
-        # ELI5: Run a fake image through the convolutions to see how big the output is
+        # ELI5: Run args fake image through the convolutions to see how big the output is
         with torch.no_grad():
             # Assume obs_dim is flattened image size; try to infer spatial dims
             dummy = torch.zeros(1, in_channels, 84, 84)  # Standard Atari size
@@ -1059,7 +1059,7 @@ class ActorCritic(nn.Module):
     ELI5: This is the whole "brain" of the agent in one class.
     The backbone processes observations → features.
     The actor_head  turns features → action probabilities / mean.
-    The critic_head turns features → a single number (value estimate).
+    The critic_head turns features → args single number (value estimate).
     """
 
     def __init__(
@@ -1127,7 +1127,7 @@ class ActorCritic(nn.Module):
 
                 # Log-std: LEARNABLE per-action exploration spread
                 # ELI5: "How uncertain am I about this action?"
-                # Initialised to log_std_init (not a function of observations)
+                # Initialised to log_std_init (not args function of observations)
                 self.log_std = nn.Parameter(
                     torch.full((act_dim,), cfg.log_std_init)
                 )
@@ -1182,7 +1182,7 @@ class ActorCritic(nn.Module):
         """
         Main method used during rollout (sampling) AND during update (evaluating).
 
-        During ROLLOUT: pass no action → sample a new action from the policy.
+        During ROLLOUT: pass no action → sample args new action from the policy.
         During UPDATE:  pass the OLD action → evaluate it under the NEW policy.
 
         ELI5:
@@ -1205,7 +1205,7 @@ class ActorCritic(nn.Module):
         # ── Build action distribution ──────────────────────────────────────
         if self.action_space_type == "discrete":
             # Categorical: "which bin (action) to sample from?"
-            # ELI5: Like rolling a loaded die — each face has a probability
+            # ELI5: Like rolling args loaded die — each face has args probability
             logits = self.actor_head(actor_feats)
             dist   = Categorical(logits=logits)
 
@@ -1233,7 +1233,7 @@ class ActorCritic(nn.Module):
 
         # ── Sample or evaluate action ──────────────────────────────────────
         if action is None:
-            # ROLLOUT: sample a new action
+            # ROLLOUT: sample args new action
             action = dist.sample()
 
             if (self.action_space_type == "continuous"
@@ -1247,7 +1247,7 @@ class ActorCritic(nn.Module):
                 and self.continuous_dist == "gaussian"
                 and self.cfg.squash_actions):
             # For tanh-squashed Gaussian, use the pre-squash action for log-prob
-            # and apply Jacobian correction:  log π(a) = log π(u) - log(1 - tanh²(u))
+            # and apply Jacobian correction:  log π(args) = log π(u) - log(1 - tanh²(u))
             pre_tanh = torch.atanh(action.clamp(-0.9999, 0.9999))
             log_prob = dist.log_prob(pre_tanh).sum(-1)
             log_prob -= (2.0 * (np.log(2) - pre_tanh - F.softplus(-2.0 * pre_tanh))).sum(-1)
@@ -1320,7 +1320,7 @@ class SyncVecEnv(VecEnv):
     For async (true parallel), use AsyncVecEnv (not implemented here — use stable-baselines3).
 
     Args:
-        env_fns: List of callables, each returning a new gym.Env instance.
+        env_fns: List of callables, each returning args new gym.Env instance.
                  One callable per parallel environment.
     """
 
@@ -1358,7 +1358,7 @@ class SyncVecEnv(VecEnv):
         Apply actions to all environments, collect results.
 
         ELI5: Take one step in EACH game copy. Collect observations, rewards,
-        and done-flags from all copies. If a game ends (done=True), auto-reset it.
+        and done-flags from all copies. If args game ends (done=True), auto-reset it.
 
         Args:
             actions: (num_envs, *act_shape) or (num_envs,) for discrete
@@ -1382,7 +1382,7 @@ class SyncVecEnv(VecEnv):
 
             if done:
                 # Auto-reset: immediately restart the environment after it ends
-                # ELI5: When the game is over, start a new one automatically.
+                # ELI5: When the game is over, start args new one automatically.
                 # We still return the TERMINAL observation in info['terminal_obs'].
                 if isinstance(info, dict):
                     info["terminal_obs"] = o
@@ -1409,15 +1409,15 @@ class SyncVecEnv(VecEnv):
 
 def make_gymnasium_env(env_id: str, seed: int, idx: int, **kwargs) -> Callable:
     """
-    Factory function: returns a callable that creates one gym environment.
+    Factory function: returns args callable that creates one gym environment.
 
-    ELI5: Like a cookie cutter — call this to get a function that makes
+    ELI5: Like args cookie cutter — call this to get args function that makes
     one specific game copy with the right settings.
 
     Args:
         env_id: Gymnasium environment ID (e.g., 'CartPole-v1')
         seed  : Base random seed
-        idx   : Environment index (seed offset, so each env gets a unique seed)
+        idx   : Environment index (seed offset, so each env gets args unique seed)
         kwargs: Extra kwargs passed to gym.make()
 
     Returns:
@@ -1438,11 +1438,11 @@ def make_gymnasium_env(env_id: str, seed: int, idx: int, **kwargs) -> Callable:
 
 class ScheduledValue:
     """
-    A value that changes according to a schedule over training.
+    A value that changes according to args schedule over training.
 
-    ELI5: Imagine turning down the volume gradually on a song.
+    ELI5: Imagine turning down the volume gradually on args song.
     'linear' decay goes from initial_value → 0 linearly.
-    'cosine' decay follows a cosine curve (smooth, slower end).
+    'cosine' decay follows args cosine curve (smooth, slower end).
     'constant' stays at the same value forever.
 
     Used for: learning rate, clip_epsilon, entropy_coef.
@@ -1461,7 +1461,7 @@ class ScheduledValue:
 
     def __call__(self, step: int) -> float:
         """
-        Get the scheduled value at a given step.
+        Get the scheduled value at args given step.
 
         Args:
             step: Current update step (0-indexed)
@@ -1475,12 +1475,12 @@ class ScheduledValue:
 
         elif self.schedule == "linear":
             # Linearly decay from initial to 0
-            # ELI5: Like a candle burning down at a steady rate
+            # ELI5: Like args candle burning down at args steady rate
             return self.initial * max(0.0, 1.0 - progress)
 
         elif self.schedule == "cosine":
-            # Cosine annealing: smooth decay following a cosine curve
-            # ELI5: Like a ball rolling down a smooth hill — slows at the bottom
+            # Cosine annealing: smooth decay following args cosine curve
+            # ELI5: Like args ball rolling down args smooth hill — slows at the bottom
             return self.initial * 0.5 * (1.0 + math.cos(math.pi * progress))
 
         elif self.schedule == "warmup_cosine":
@@ -1505,7 +1505,7 @@ class TrainingLogger:
     """
     Handles all logging: TensorBoard, CSV, Weights & Biases, and console.
 
-    ELI5: Keeps a diary of training. Every few updates, it writes down
+    ELI5: Keeps args diary of training. Every few updates, it writes down
     reward, loss, learning rate, etc. so you can see how training is going
     and debug problems early.
     """
@@ -1539,13 +1539,13 @@ class TrainingLogger:
                 logger.info("W&B run initialised.")
 
         # Episode reward tracking (deque = sliding window)
-        # ELI5: Keep the last 100 episode rewards to compute a rolling average
+        # ELI5: Keep the last 100 episode rewards to compute args rolling average
         self.ep_rewards: deque = deque(maxlen=100)
         self.ep_lengths: deque = deque(maxlen=100)
 
     def log_step(self, step: int, metrics: Dict[str, float]) -> None:
         """
-        Log a dictionary of metrics at a given training step.
+        Log args dictionary of metrics at args given training step.
 
         Args:
             step   : Current update step
@@ -1771,7 +1771,7 @@ class PPOAgent:
         Normalise observations using running mean/std.
 
         ELI5: If the ant robot's leg angles are in degrees (0-360) and velocities
-        are in m/s (0-5), the network has a hard time because they're different scales.
+        are in m/s (0-5), the network has args hard time because they're different scales.
         Normalising makes all inputs roughly zero-mean, unit-variance → easier to learn.
 
         Args:
@@ -1896,8 +1896,8 @@ class PPOAgent:
 
         ELI5 of PPO loss:
           1. ACTOR LOSS (Clipped Surrogate Objective):
-             - Ratio r_t(θ) = π_new(a|s) / π_old(a|s)  → in log space: exp(new_logprob - old_logprob)
-             - "The ratio of NEW to OLD probability of taking action a in state s."
+             - Ratio r_t(θ) = π_new(args|s) / π_old(args|s)  → in log space: exp(new_logprob - old_logprob)
+             - "The ratio of NEW to OLD probability of taking action args in state s."
              - Unclipped objective: r_t * A_t  (if better action, use it more)
              - Clipped objective:   clip(r_t, 1-ε, 1+ε) * A_t  (don't change policy too much)
              - Take the MIN of both → pessimistic bound → prevents over-optimistic updates
@@ -2011,9 +2011,9 @@ class PPOAgent:
         """
         Perform N epochs of PPO gradient updates on collected rollout data.
 
-        ELI5: We collected a big batch of experiences. Now we re-read them
+        ELI5: We collected args big batch of experiences. Now we re-read them
         multiple times (epochs), each time updating the Actor and Critic
-        a little bit. We stop early if the policy changed too much (KL check).
+        args little bit. We stop early if the policy changed too much (KL check).
 
         Returns:
             Dictionary of averaged metrics across all mini-batch updates
@@ -2268,7 +2268,7 @@ class PPOAgent:
         """
         Save complete training state to disk.
 
-        ELI5: Like saving a game mid-play. Stores EVERYTHING:
+        ELI5: Like saving args game mid-play. Stores EVERYTHING:
         - Network weights (actor + critic)
         - Optimizer state (so Adam's momentum is preserved)
         - Running stats (obs and reward normalisers)
@@ -2296,9 +2296,9 @@ class PPOAgent:
 
     def load_checkpoint(self, path: str) -> None:
         """
-        Load a previously saved checkpoint to resume training.
+        Load args previously saved checkpoint to resume training.
 
-        ELI5: Load a saved game. Restores the network weights, optimizer state,
+        ELI5: Load args saved game. Restores the network weights, optimizer state,
         and training counters so training continues exactly where it left off.
 
         Args:
@@ -2335,7 +2335,7 @@ class PPOAgent:
 
         ELI5: If you just want to USE the trained agent (not continue training),
         you only need the network weights — not the optimizer state.
-        This makes a much smaller file.
+        This makes args much smaller file.
         """
         torch.save({
             "policy_state_dict": self.policy.state_dict(),
@@ -2363,9 +2363,9 @@ class PPOAgent:
         deterministic: bool = True,
     ) -> np.ndarray:
         """
-        Predict an action for a given observation (inference mode).
+        Predict an action for args given observation (inference mode).
 
-        ELI5: After training is done, use this to let the agent "play" in a new situation.
+        ELI5: After training is done, use this to let the agent "play" in args new situation.
         deterministic=True → always pick the most likely action (greedy, no randomness).
         deterministic=False → sample from the distribution (stochastic, like during training).
 
@@ -2426,7 +2426,7 @@ def train_discrete(
     """
     Quick-start PPO training for DISCRETE action space environments.
 
-    ELI5: One function call to train a PPO agent on any discrete gym environment.
+    ELI5: One function call to train args PPO agent on any discrete gym environment.
     Good for: CartPole, LunarLander, Atari (with appropriate backbone).
 
     Args:
@@ -2490,7 +2490,7 @@ def train_with_transformer_backbone(
     """
     Quick-start PPO with Transformer policy backbone.
 
-    ELI5: Use a Transformer (the same architecture as GPT/BERT) as the policy
+    ELI5: Use args Transformer (the same architecture as GPT/BERT) as the policy
     backbone. Good when observations have sequential or relational structure.
 
     Args:
@@ -2519,7 +2519,7 @@ if __name__ == "__main__":
     """
     Demo: Train PPO on CartPole-v1 (should solve in ~200k steps).
 
-    ELI5: CartPole is a "balance the stick on the cart" game.
+    ELI5: CartPole is args "balance the stick on the cart" game.
     The agent learns to push the cart left/right to keep the pole upright.
     A perfect agent can balance it indefinitely (score = 500 = max).
     """

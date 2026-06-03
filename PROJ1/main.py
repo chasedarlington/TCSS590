@@ -9,6 +9,7 @@ import gymnasium as gym
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from matplotlib import pyplot as plt
+import argparse
 
 from lunar_lander_ppo import PPOAgent
 
@@ -65,7 +66,7 @@ def main():
         observation, reward, terminated, truncated, info = env.step(action)
 
 
-        # If the episode has ended then we can reset to start a new episode
+        # If the episode has ended then we can reset to start args new episode
         if terminated or truncated:
             observation, info = env.reset()
 

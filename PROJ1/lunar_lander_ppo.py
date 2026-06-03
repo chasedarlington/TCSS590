@@ -72,7 +72,7 @@ class PPOAgent:
         del self.dones[:]
 
     def act(self, state):
-        #return action given a state
+        #return action given args state
         with torch.no_grad():
           state = torch.as_tensor(state, device=self.device, dtype=torch.float32)
           action,action_logprob,state_val = self.policy_old.act(state) # STOCHASTIC ACTION SELECTION

@@ -15,4 +15,5 @@ dependencies:
       - gymnasium[box2d]
       - "setuptools<81"
       - tensorboard
+      - flask
 
