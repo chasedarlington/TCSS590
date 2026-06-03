@@ -94,7 +94,7 @@ class PPOAgent:
 
 def train(args):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env=gym.make("LunarLander-v2"); writer=SummaryWriter("runs/ppo_lunar_lander")
+    env=gym.make("LunarLander-v2"); writer=SummaryWriter(args.log_dir)
     agent=PPOAgent(
         state_size=env.observation_space.shape[0],
         action_size=env.action_space.n,
@@ -114,12 +114,12 @@ def train(args):
         ep_timeout_penalty=args.ep_timeout_penalty,
         writer=writer
     )
-    agent.save(MODEL_PATH); writer.close(); env.close()
+    agent.save(args.model); writer.close(); env.close()
     plt.plot(scores); plt.xlabel("Episode"); plt.ylabel("Reward"); plt.title("PPO LunarLander Training Scores"); plt.show()
 
 def render(episodes=5,model_path=MODEL_PATH):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env=gym.make("LunarLander-v2",render_mode="human"); agent=PPOAgent(env=env,device=device); agent.load(model_path); agent.policy.eval()
+    env=gym.make("LunarLander-v2",render_mode="human"); agent=PPOAgent(env.observation_space.shape[0], env.action_space.n, device); agent.load(model_path); agent.policy.eval()
     for ep in range(episodes):
         state,_=env.reset(); done=False; total=0
         while not done:
@@ -145,29 +145,18 @@ def export_pngs(log_dir="runs/ppo_lunar_lander",out_dir="tensorboard_pngs"):
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
-    if parser:
-        """
-        TIMESTEP,EPOCHS,EPSILON,GAMMA=2048,10,0.2,0.99
-        LR_ACTOR,LR_CRITIC=3e-4,1e-3
-        EPISODES,EP_MAX_STEPS=2000,1000
-        EP_REWARD_PENALTY,EP_TIMEOUT_PENALTY=-0.01,-25.0
-        """
-        parser.add_argument("mode", choices=["train", "render", "play", "export"], nargs="?", default="train")
-
-        parser.add_argument("--timestep", type=int, default=TIMESTEP)
-        parser.add_argument("--epochs", type=int, default=EPOCHS)
-        parser.add_argument("--epsilon", type=float, default=EPSILON)
-        parser.add_argument("--gamma", type=float, default=GAMMA)
-
-        parser.add_argument("--lr-actor", type=float, default=LR_ACTOR)
-        parser.add_argument("--lr-critic", type=float, default=LR_CRITIC)
-
-        parser.add_argument("--episodes", type=int, default=EPISODES)
-        parser.add_argument("--ep-max-steps", type=int, default=EP_MAX_STEPS)
-        parser.add_argument("--ep-reward-penalty", type=float, default=EP_REWARD_PENALTY)
-        parser.add_argument("--ep-timeout-penalty", type=float, default=EP_TIMEOUT_PENALTY)
-
-        parser.add_argument("--model", default=MODEL_PATH)
+    parser.add_argument("mode",choices=["train","render","play","export"],nargs="?",default="train")
+    parser.add_argument("--timestep",type=int,default=TIMESTEP)
+    parser.add_argument("--epochs",type=int,default=EPOCHS)
+    parser.add_argument("--epsilon",type=float,default=EPSILON)
+    parser.add_argument("--gamma",type=float,default=GAMMA)
+    parser.add_argument("--lr-actor",type=float,default=LR_ACTOR)
+    parser.add_argument("--lr-critic",type=float,default=LR_CRITIC)
+    parser.add_argument("--episodes",type=int,default=EPISODES)
+    parser.add_argument("--ep-max-steps",type=int,default=EP_MAX_STEPS)
+    parser.add_argument("--ep-reward-penalty",type=float,default=EP_REWARD_PENALTY)
+    parser.add_argument("--ep-timeout-penalty",type=float,default=EP_TIMEOUT_PENALTY)
+    parser.add_argument("--log-dir",default="runs/ppo_lunar_lander")
+    parser.add_argument("--model",default=MODEL_PATH)
     args=parser.parse_args()
-
-    {"train":train(args),"render":lambda:render(args.episodes, args.model), "play":play, "export":export_pngs}[args.mode]()
+    {"train":lambda:train(args),"render":lambda:render(args.episodes,args.model),"play":play,"export":export_pngs}[args.mode]()
