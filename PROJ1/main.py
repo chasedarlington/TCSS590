@@ -6,7 +6,10 @@ saves the trained model, and closes the environment.
 """
 
 import gymnasium as gym
+import numpy as np
 import torch
+from matplotlib import pyplot as plt
+
 from lunar_lander_ppo import PPOAgent
 
 def main():
@@ -97,6 +100,13 @@ def render(model_path="ppo_lunar_lander.pt", episodes=5):
 
     env.close()
 
+
+
+
 if __name__ == "__main__":
+
+    ## CREATE THE AGENT AND TRAIN THE MODEL !!
     #main()
+
+    ## RENDER PREVIOUSLY TRAINED AGENT !! (USE .PT FILE)
     render()
