@@ -115,7 +115,10 @@ def train(args):
         writer=writer
     )
     agent.save(args.model); writer.close(); env.close()
-    plt.plot(scores); plt.xlabel("Episode"); plt.ylabel("Reward"); plt.title("PPO LunarLander Training Scores"); plt.show()
+    plt.plot(scores); plt.xlabel("Episode"); plt.ylabel("Reward"); plt.title("PPO LunarLander Training Scores")
+    os.makedirs(args.log_dir, exist_ok=True)
+    plt.savefig(os.path.join(args.log_dir, "training_scores.png"), dpi=200)
+    plt.close()
 
 def render(episodes=5,model_path=MODEL_PATH):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -159,4 +162,9 @@ if __name__=="__main__":
     parser.add_argument("--log-dir",default="runs/ppo_lunar_lander")
     parser.add_argument("--model",default=MODEL_PATH)
     args=parser.parse_args()
-    {"train":lambda:train(args),"render":lambda:render(args.episodes,args.model),"play":play,"export":export_pngs}[args.mode]()
+    {
+    "train": lambda: train(args),
+    "render": lambda: render(args.episodes, args.model),
+    "play": play,
+    "export": lambda: export_pngs(args.log_dir),
+    }[args.mode]()

@@ -1,7 +1,6 @@
 import subprocess
 from datetime import datetime
 from flask import Flask, redirect, request
-from sympy.abc import epsilon
 
 app = Flask(__name__)
 process = None
@@ -19,20 +18,39 @@ def home():
         <p>Status: {"Training running" if running else "Training not running"}</p>
 
         <form action="/run" method="post">
+            
+            <label>Run name:</label><br>
+            <input name="run_name" type="text" value="ppo_lunar_lander"><br><br>
+                                    
+            <label>Timestep:</label><br>
+            <input name="timestep" type="number" value="2048"><br><br>
+            
+            <label>PPO epochs:</label><br>
+            <input name="epochs" type="number" value="10"><br><br>
+            
+            <label>Epsilon:</label><br>
+            <input name="epsilon" type="number" step="0.01" value="0.2"><br><br>
+            
+            <label>Gamma:</label><br>
+            <input name="gamma" type="number" step="0.01" value="0.99"><br><br>
+            
+            <label>Actor Learning Rate:</label><br>
+            <input name="lr_actor" type="number" step="0.0001" value="0.0003"><br><br>
+            
+            <label>Critic Learning Rate:</label><br>
+            <input name="lr_critic" type="number" step="0.0001" value="0.001"><br><br>
+            
             <label>Episodes:</label><br>
+            <input name="episodes" type="number" value="2000"><br><br>
             
-            <input name="timestep" type="number" value="2048">
-            <input name="epochs" type="number" value="10">
-            <input name="epsilon" type="number" step="0.01" value="0.2">
-            <input name="gamma" type="number" step="0.01" value="0.99">
+            <label>Maximum Steps per Episode:</label><br>
+            <input name="ep_max_steps" type="number" value="1000"><br><br>
             
-            <input name="lr_actor" type="number" step="0.0001" value="0.0003">
-            <input name="lr_critic" type="number" step="0.0001" value="0.001">
+            <label>Reward Penalty per Timestep:</label><br>
+            <input name="ep_reward_penalty" type="number" step="0.01" value="-0.01"><br><br>
             
-            <input name="episodes" type="number" value="2000">
-            <input name="ep_max_steps" type="number" value="1000">
-            <input name="ep_reward_penalty" type="number" step="0.01" value="-0.01">
-            <input name="ep_timeout_penalty" type="number" step="1" value="-25.0">
+            <label>Timeout Penalty (exceeding max steps per episode):</label><br>
+            <input name="ep_timeout_penalty" type="number" step="1" value="-25.0"><br><br>
 
             <button type="submit" style="font-size: 20px; padding: 10px 20px;">
                 Run Training
