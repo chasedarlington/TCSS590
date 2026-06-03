@@ -91,7 +91,7 @@ class PPOAgent:
         state_values = self.critic(state)
         return action_logprobs, state_values, dist_entropy
 
-    def update(self , rewards): # detach() to prevent backpropagation through old policy's states/actions/logprobs/state_values
+    def update(self , rewards, writer=None): # detach() to prevent backpropagation through old policy's states/actions/logprobs/state_values
 
         old_states = torch.squeeze(torch.stack(self.states, dim=0)).detach().to(self.device)
         old_actions = torch.squeeze(torch.stack(self.actions, dim=0)).detach().to(self.device)
@@ -111,16 +111,27 @@ class PPOAgent:
             surr1 = ratios * advantages # surrogate loss without clipping
             surr2 = torch.clamp(ratios, 1-self.epsilon, 1+self.epsilon) * advantages # clipped surrogate loss
             state_values = torch.squeeze(state_values) # squeeze states for loss fxn (match rewards tensor dimensions)
-            loss = -torch.min(surr1, surr2) + 0.5 * F.smooth_l1_loss(state_values, rewards) - 0.01 * dist_entropy # final loss of PPO surrogate objective
+            actor_loss = -torch.min(surr1, surr2)
+            critic_loss = F.smooth_l1_loss(state_values, rewards)
+            loss = actor_loss + 0.5 * critic_loss - 0.01 * dist_entropy # final loss of PPO surrogate objective
+
+
             ## note: smoothing with Huber loss for value function, and adding an entropy bonus to encourage exploration. The critic loss is weighted by 0.5 and the entropy bonus is weighted by 0.01. The negative sign in front of the surrogate loss is because we want to maximize it, but optimizers minimize the loss.
             
             self.optimizer.zero_grad() # take gradient step
             loss.mean().backward() # back propagate the loss
             self.optimizer.step() # update the network parameters
 
+            ## LOGGING !!
+            if writer is not None and global_step is not None:
+                writer.add_scalar("Loss/Total", loss.mean().item(), global_step)
+                writer.add_scalar("Loss/Actor", actor_loss.mean().item(), global_step)
+                writer.add_scalar("Loss/Critic", critic_loss.item(), global_step)
+                writer.add_scalar("Policy/Entropy", entropy_bonus.mean().item(), global_step)
+
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-    def learn(self):
+    def learn(self, writer):
         rewards = []
         discounted_reward = 0
         for reward, done in zip(reversed(self.rewards), reversed(self.dones)):
@@ -132,12 +143,11 @@ class PPOAgent:
         # Normalizing the rewards
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
-        self.update(rewards)
+        self.update(rewards,writer)
         self.empty_lists()
 
-    def train_agent(self, env, num_episodes=EPISODES, batch_size=MINI_BATCH_SIZE):
+    def train_agent(self, env, num_episodes=EPISODES, batch_size=MINI_BATCH_SIZE, writer=None):
         time_step = 0
-        i_episode = 1
         scores = []
 
         for i_episode in range(1, num_episodes+1):
@@ -152,10 +162,18 @@ class PPOAgent:
                 time_step +=1
                 current_ep_reward += reward
                 if time_step % self.update_timestep == 0:
-                    self.learn()
+                    self.learn(writer)
                 if done:
                     break
+
+            ## LOGGING !!
             scores.append(current_ep_reward)
+            avg_score_100 = np.mean(scores[-100:])
+            if writer is not None:
+                writer.add_scalar("Train/Episode_Return", current_ep_reward, i_episode)
+                writer.add_scalar("Train/Average_Return_100", avg_score_100, i_episode)
+                writer.add_scalar("Train/Episode_Length", t, i_episode)
+                writer.add_scalar("Train/Total_Timesteps", time_step, i_episode)
             print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores[-100:])), end="")
             if i_episode % 100 == 0:
                 print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores[-100:])))

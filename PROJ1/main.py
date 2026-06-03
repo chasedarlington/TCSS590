@@ -8,6 +8,7 @@ saves the trained model, and closes the environment.
 import gymnasium as gym
 import numpy as np
 import torch
+from torch.utils.tensorboard import SummaryWriter
 from matplotlib import pyplot as plt
 
 from lunar_lander_ppo import PPOAgent
@@ -16,7 +17,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ## INITIALIZE THE ENVIRONMENT !!
-
+    writer = SummaryWriter(log_dir="runs/ppo_lunar_lander")
     env = gym.make("LunarLander-v2")
 
     ## CREATE THE AGENT !!      using env observation and action dimensions
@@ -27,9 +28,15 @@ def main():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     )
 
-    scores = agent.train_agent(env)
+    scores = agent.train_agent(env, writer)
+    plt.plot(scores)
+    plt.xlabel("Episode")
+    plt.ylabel("Reward")
+    plt.title("PPO LunarLander Training Scores")
+    plt.show()
 
     agent.save("ppo_lunar_lander.pt")
+    writer.close()
     env.close()
 
     """
@@ -110,3 +117,29 @@ if __name__ == "__main__":
 
     ## RENDER PREVIOUSLY TRAINED AGENT !! (USE .PT FILE)
     render()
+
+
+    """ 
+    TENSOR BOARD TAGS
+    
+        Train/Episode_Return
+        Train/Average_Return_100
+        Train/Episode_Length
+        Train/Total_Timesteps
+        
+        Loss/Total
+        Loss/Actor
+        Loss/Critic
+
+        Policy/Entropy
+        
+    PLOTS
+    
+        Average_Return_100
+        Episode_Return
+        Episode_Length
+        Loss/Actor
+        Loss/Critic
+        Policy/Entropy
+        
+    """
