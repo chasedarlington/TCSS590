@@ -41,10 +41,7 @@ def home():
     <html>
     <body style="font-family: Arial; margin: 40px; max-width: 760px;">
         <h1>LunarLander PPO Control Panel</h1>
-        <p>Training status: {"Training running" if running else "Training not running"}</p>
-        <p>External pygame play status: {"Play running" if playing else "Play not running"}</p>
-
-        <h2>Train</h2>
+        <h2>Train PPO Agent</h2>
         <form action="/run" method="post">
             <label for="run_name">Run name:</label><br>
             <input id="run_name" name="run_name" type="text" value="ppo_lunar_lander" style="width: 420px;"><br><br>
@@ -65,7 +62,7 @@ def home():
             <button type="submit" style="font-size: 18px; padding: 10px 20px;">Stop Training</button>
         </form>
 
-        <h2>Render trained agent in browser</h2>
+        <h2>Render Trained Agent</h2>
         <form action="/render" method="get">
             <label for="model">Model path:</label><br>
             <input id="model" name="model" type="text" value="{latest_model}" style="width: 420px;"><br><br>
@@ -74,16 +71,17 @@ def home():
             <button type="submit" style="font-size: 18px; padding: 10px 20px;">Open Browser Render</button>
         </form>
 
-        <h2>Play manually in browser</h2>
-        <p>Controls: W = main engine, A = left engine, D = right engine, S or key release = no-op.</p>
-        <p><a href="/browser_play" style="font-size: 18px;">Open Browser Keyboard Play</a></p>
+        <h2>Play In Browser</h2>
+        <form action="/browser_play" method="post">
+            <button type="submit" style="font-size: 18px; padding: 10px 20px;">Launch External Keyboard Play Window</button>
+        </form>
 
-        <h2>Optional external pygame play window</h2>
+        <h2>Play Out of Browser (pygame)</h2>
         <form action="/play" method="post">
             <button type="submit" style="font-size: 18px; padding: 10px 20px;">Launch External Keyboard Play Window</button>
         </form>
 
-        <h2>Export TensorBoard PNGs</h2>
+        <h2>Export TensorBoard PNG</h2>
         <form action="/export" method="post">
             <label for="log_dir">TensorBoard log dir:</label><br>
             <input id="log_dir" name="log_dir" type="text" value="{latest_run}" style="width: 420px;"><br><br>
