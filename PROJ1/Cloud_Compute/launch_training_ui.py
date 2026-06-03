@@ -94,6 +94,8 @@ def home():
             {slider("ep_max_steps", "Max episode steps", "1000", "100", "2000", "100")}
             {slider("ep_reward_penalty", "Per-step reward penalty", "-0.01", "-0.20", "0", "0.01")}
             {slider("ep_timeout_penalty", "Timeout penalty", "-25.0", "-200", "0", "5")}
+            {slider("parallel_envs", "Parallel environments", "1", "1", "16", "1")}
+            {slider("rollout_workers", "Rollout workers", "1", "1", "16", "1")}
             <button type="submit" style="font-size: 18px; padding: 10px 20px;">Run Training</button>
         </form>
 
@@ -147,6 +149,8 @@ def run():
     ep_max_steps = request.form.get("ep_max_steps", "1000")
     ep_reward_penalty = request.form.get("ep_reward_penalty", "-0.01")
     ep_timeout_penalty = request.form.get("ep_timeout_penalty", "-25.0")
+    parallel_envs = request.form.get("parallel_envs", "1")
+    rollout_workers = request.form.get("rollout_workers", "1")
     run_name = request.form.get("run_name", "ppo_lunar_lander")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -159,6 +163,8 @@ def run():
     print(f"Starting training run {run_id}", file=log_file, flush=True)
     print(f"TensorBoard log dir: {tensorboard_dir}", file=log_file, flush=True)
     print(f"Model path: {model_path}", file=log_file, flush=True)
+    print(f"Parallel envs: {parallel_envs}", file=log_file, flush=True)
+    print(f"Rollout workers: {rollout_workers}", file=log_file, flush=True)
 
     process = subprocess.Popen([
         "python", "-u", "single_file_version.py", "train",
@@ -172,6 +178,8 @@ def run():
         "--ep-max-steps", ep_max_steps,
         "--ep-reward-penalty", ep_reward_penalty,
         "--ep-timeout-penalty", ep_timeout_penalty,
+        "--parallel-envs", parallel_envs,
+        "--rollout-workers", rollout_workers,
         "--log-dir", tensorboard_dir,
         "--model", model_path,
     ], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True)
