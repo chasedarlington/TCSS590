@@ -1,0 +1,45 @@
+{
+  "env": "reacher",
+  "train": "behavior_cloning",
+  "policy": "gaussian",
+  "num_epochs": null,
+  "episode_length": null,
+  "batch_size": null,
+  "num_validation_runs": null,
+  "num_epochs_values": null,
+  "episode_length_values": null,
+  "batch_size_values": null,
+  "num_validation_runs_values": null,
+  "seeds": [
+    0
+  ],
+  "sweeps": [
+    "num_epochs",
+    "episode_length",
+    "batch_size",
+    "num_validation_runs"
+  ],
+  "main_file": "main.py",
+  "output_dir": "plots",
+  "no_show": false,
+  "baseline": {
+    "num_epochs": 500,
+    "episode_length": 50,
+    "batch_size": 32,
+    "num_validation_runs": 100
+  },
+  "sweep_values_by_name": {
+    "num_epochs": [
+      500
+    ],
+    "episode_length": [
+      50
+    ],
+    "batch_size": [
+      32
+    ],
+    "num_validation_runs": [
+      100
+    ]
+  }
+}

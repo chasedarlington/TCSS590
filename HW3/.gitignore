@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model weights / large outputs
+*.pt
+*.pth
+*.ckpt
+runs/
+outputs/
+wandb/
