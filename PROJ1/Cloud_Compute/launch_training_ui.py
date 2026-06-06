@@ -6,12 +6,12 @@ import threading
 import time
 from datetime import datetime
 from io import BytesIO
-
 from flask import Flask, Response, redirect, request, send_from_directory
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_DIR = os.path.join(BASE_DIR, "logs")
-PNG_DIR = os.path.join(BASE_DIR, "tensorboard_pngs")
+## Get path to current file and define directories for logs and PNG exports (/log and /png )
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
+LOG_DIR = os.path.join(BASE_DIR, "log")
+PNG_DIR = os.path.join(BASE_DIR, "tensorboard_png")
 
 app = Flask(__name__)
 process = None
@@ -23,28 +23,16 @@ browser_state = None
 browser_action = 0
 browser_lock = threading.Lock()
 
-
 def rel(path):
     return path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
-
-
-def slider(name, label, value, min_value, max_value, step):
-    return f"""
-        <label for="{name}">{label}: <span id="{name}_value">{value}</span></label><br>
-        <input id="{name}" name="{name}" type="range" min="{min_value}" max="{max_value}" step="{step}" value="{value}"
-               oninput="document.getElementById('{name}_value').innerText = this.value" style="width: 420px;"><br><br>
-    """
-
 
 def latest_file(pattern):
     files = glob.glob(rel(pattern))
     return os.path.basename(max(files, key=os.path.getmtime)) if files else ""
 
-
 def latest_run_dir():
     files = glob.glob(os.path.join(BASE_DIR, "runs", "*"))
     return os.path.relpath(max(files, key=os.path.getmtime), BASE_DIR) if files else "runs/ppo_lunar_lander"
-
 
 def read_log(path, max_chars=30000):
     if not path:
@@ -56,13 +44,22 @@ def read_log(path, max_chars=30000):
     except FileNotFoundError:
         return "Log file not found yet."
 
-
 def open_log(run_id, suffix="train"):
     os.makedirs(LOG_DIR, exist_ok=True)
     return os.path.join(LOG_DIR, f"{run_id}_{suffix}.log")
 
+### Slider helper function
+## Helper function to create an HTML slider input for the training parameters. It generates a label and an input of type range, with JavaScript to update the displayed value as the slider is moved.
+def slider(name, label, value, min_value, max_value, step):
+    return f"""
+        <label for="{name}">{label}: <span id="{name}_value">{value}</span></label><br>
+        <input id="{name}" name="{name}" type="range" min="{min_value}" max="{max_value}" step="{step}" value="{value}"
+               oninput="document.getElementById('{name}_value').innerText = this.value" style="width: 420px;"><br><br>
+    """
 
-@app.route("/")
+### Home route
+## The main route of the Flask application that serves the control panel for training and playing the LunarLander PPO agent. It displays the current status of training and play processes, provides links to logs and status pages, and contains forms to start/stop training, launch play windows, render trained agents, and export TensorBoard PNGs.
+@app.route("/") # Flask route decorator (When someone visits the root URL /, run the function directly below this line.)
 def home():
     running = process is not None and process.poll() is None
     playing = play_process is not None and play_process.poll() is None
@@ -132,8 +129,8 @@ def home():
     </html>
     """
 
-
-@app.route("/run", methods=["POST"])
+## Run training
+@app.route("/run", methods=["POST"]) # Flask route decorator (When someone visits the URL /run, run the function directly below this line.)
 def run():
     global process, log_file_path
     if process is not None and process.poll() is None:
@@ -185,7 +182,7 @@ def run():
     ], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True)
     return redirect("/")
 
-
+## Stop training
 @app.route("/stop", methods=["POST"])
 def stop():
     global process
@@ -193,7 +190,7 @@ def stop():
         process.terminate()
     return redirect("/")
 
-
+## Start external pygame play window
 @app.route("/play", methods=["POST"])
 def play():
     global play_process, play_log_file_path
@@ -204,7 +201,7 @@ def play():
         play_process = subprocess.Popen(["python", "-u", "single_file_version.py", "play"], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True)
     return redirect("/")
 
-
+## Status endpoint for AJAX polling
 @app.route("/status")
 def status():
     return {
@@ -216,7 +213,7 @@ def status():
         "play_log": play_log_file_path,
     }
 
-
+## Logs page with auto-refresh every 2 seconds
 @app.route("/logs")
 def logs():
     selected = request.args.get("which", "train")
@@ -233,7 +230,7 @@ def logs():
     </html>
     """
 
-
+# Logs embedded in an iframe with auto-refresh every 2 seconds, showing only the last 12000 characters for performance
 @app.route("/logs_embed")
 def logs_embed():
     content = html.escape(read_log(log_file_path, max_chars=12000))
@@ -246,14 +243,14 @@ def logs_embed():
     </html>
     """
 
-
+# Endpoint to serve log text for AJAX fetching (not used in current version but can be useful for future enhancements)
 @app.route("/log_text")
 def log_text():
     selected = request.args.get("which", "train")
     path = play_log_file_path if selected == "play" else log_file_path
     return Response(read_log(path), mimetype="text/plain")
 
-
+# Browser-based play interface with keyboard controls (WASD or arrow keys) and live game rendering using MJPEG streaming
 @app.route("/browser_play")
 def browser_play():
     return """
@@ -281,15 +278,17 @@ def browser_play():
     </html>
     """
 
-
+### GYM ENV !!!
+## Global variables to hold the Gym environment, current state, and action for the browser play interface. A lock is used to synchronize access to these variables between the streaming generator and the action update route.
 def ensure_browser_env():
     global browser_env, browser_state
     import gymnasium as gym
     if browser_env is None:
         browser_env = gym.make("LunarLander-v2", render_mode="rgb_array")
         browser_state, _ = browser_env.reset()
-
-
+ 
+### ENCODE JPEG FRAME !!!
+## Function to encode a single video frame (numpy array) as JPEG bytes for streaming to the browser. Uses PIL to convert the array to an image and save it to a bytes buffer.
 def encode_frame(frame):
     from PIL import Image
     image = Image.fromarray(frame)
@@ -297,7 +296,8 @@ def encode_frame(frame):
     image.save(buffer, format="JPEG", quality=85)
     return buffer.getvalue()
 
-
+### MJPEG STREAMING GENERATOR !!!
+## Generator function that continuously renders frames from the Gym environment, applies the current action, and yields the frames as MJPEG stream data. It also handles episode termination and resetting the environment when needed.
 def browser_play_frames():
     global browser_state, browser_action
     ensure_browser_env()
@@ -312,12 +312,14 @@ def browser_play_frames():
         yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + encode_frame(frame) + b"\r\n"
         time.sleep(1 / 30)
 
-
+### Browser play stream route
+## Route to serve the MJPEG stream for the browser play interface. It calls the generator function and sets the appropriate MIME type for streaming video.
 @app.route("/browser_play_stream")
 def browser_play_stream():
     return Response(browser_play_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
-
+### Browser action update route
+## Route to receive action updates from the browser via POST requests. It updates the global action variable
 @app.route("/browser_action", methods=["POST"])
 def browser_action_route():
     global browser_action
@@ -332,7 +334,8 @@ def browser_action_route():
         browser_action = action
     return {"action": action}
 
-
+### Browser reset route
+## Route to reset the Gym environment when the user clicks the reset button in the browser interface.
 @app.route("/browser_reset", methods=["POST"])
 def browser_reset():
     global browser_state, browser_action
@@ -342,7 +345,8 @@ def browser_reset():
         browser_action = 0
     return {"reset": True}
 
-
+### Browser render page
+## Route to display a page with an embedded MJPEG stream of the trained agent playing in the Gym environment. The user can specify which model to load and how many episodes to render.
 @app.route("/render")
 def render_page():
     model = request.args.get("model", latest_file("*.pt") or "ppo_lunar_lander.pt")
@@ -358,7 +362,8 @@ def render_page():
     </html>
     """
 
-
+### Render stream generator
+## Function to render frames from the Gym environment using a trained model. It loads the specified model, runs the environment for a given number of episodes, and yields the rendered frames as an MJPEG stream. The agent selects actions based on the loaded policy.
 def render_frames(model_path, episodes):
     import gymnasium as gym
     import torch
@@ -386,7 +391,8 @@ def render_frames(model_path, episodes):
     finally:
         env.close()
 
-
+### Render stream route
+## Route to serve the MJPEG stream of the rendered trained agent. It takes the model path and number of episodes as query parameters and calls the render_frames generator to produce the stream.
 @app.route("/render_stream")
 def render_stream():
     model = request.args.get("model", latest_file("*.pt") or "ppo_lunar_lander.pt")
@@ -395,7 +401,8 @@ def render_stream():
         return f"Model not found: {model}", 404
     return Response(render_frames(model, episodes), mimetype="multipart/x-mixed-replace; boundary=frame")
 
-
+### Export TensorBoard PNGs
+## Route to handle exporting TensorBoard logs to PNG images. It runs a subprocess that calls the export function in the single_file_version.py script, which should contain the logic to read TensorBoard logs and save visualizations as PNG files. After exporting, it redirects the user to the /exports page to view the generated images.
 @app.route("/export", methods=["POST"])
 def export():
     global log_file_path
@@ -406,7 +413,8 @@ def export():
         subprocess.run(["python", "-u", "single_file_version.py", "export", "--log-dir", log_dir], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True, check=False)
     return redirect("/exports")
 
-
+### Exports page
+## Route to display the exported PNG images from TensorBoard logs. It looks for PNG files in
 @app.route("/exports")
 def exports():
     os.makedirs(PNG_DIR, exist_ok=True)
@@ -425,11 +433,11 @@ def exports():
     </html>
     """
 
-
+### Export file route
+## Route to serve the exported PNG files for display on the /exports page. It uses Flask's send_from_directory to serve files from the PNG_DIR.
 @app.route("/export_file/<path:filename>")
 def export_file(filename):
     return send_from_directory(PNG_DIR, filename)
-
 
 if __name__ == "__main__":
     app.run(port=5000, threaded=True)
