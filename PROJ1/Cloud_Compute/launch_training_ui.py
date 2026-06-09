@@ -53,7 +53,7 @@ def open_log(run_id, suffix="train"):
 def slider(name, label, value, min_value, max_value, step):
     return f"""
         <label for="{name}">{label}: <span id="{name}_value">{value}</span></label><br>
-        <input id="{name}" name="{name}" type="range" min="{min_value}" max="{max_value}" step="{step}" value="{value}"
+        <input id="{name}" name="{name}" type="range" min="{min_value}" max="{max_value}" time_step="{step}" value="{value}"
                oninput="document.getElementById('{name}_value').innerText = this.value" style="width: 420px;"><br><br>
     """
 
@@ -89,7 +89,7 @@ def home():
             {slider("lr_critic", "Critic learning rate", "0.001", "0.0001", "0.005", "0.0001")}
             {slider("episodes", "Training episodes", "2000", "100", "10000", "100")}
             {slider("ep_max_steps", "Max episode steps", "1000", "100", "2000", "100")}
-            {slider("ep_reward_penalty", "Per-step reward penalty", "-0.01", "-0.20", "0", "0.01")}
+            {slider("ep_reward_penalty", "Per-time_step reward penalty", "-0.01", "-0.20", "0", "0.01")}
             {slider("ep_timeout_penalty", "Timeout penalty", "-25.0", "-200", "0", "5")}
             {slider("parallel_envs", "Parallel environments", "1", "1", "16", "1")}
             {slider("rollout_workers", "Rollout workers", "1", "1", "16", "1")}

@@ -14,15 +14,7 @@ LR_ACTOR,LR_CRITIC=0.0003,0.001
 VALUE_LOSS_COEF,ENT_COEF=0.5,0.01
 EPISODES,EP_MAX_STEPS=2000,500
 EP_REWARD_PENALTY,EP_TIMEOUT_PENALTY=-0.00001,-10.0
-PARALLEL_ENVS,ROLLOUT_WORKERS=1,1
 MODEL_PATH="ppo_lunar_lander.pt"
-SEED=43
-
-def set_seed(seed):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
 
 class Actor(nn.Module):
     def __init__(self,s,a):
@@ -82,21 +74,20 @@ class PPOAgent:
                 writer.add_scalar("Loss/Total", loss.mean().item(), time_step); writer.add_scalar("Loss/Actor", actor_loss.mean().item(), time_step); writer.add_scalar("Loss/Critic", critic_loss.item(), time_step); writer.add_scalar("Policy/Entropy", ent.mean().item(), time_step)
         self.policy_old.load_state_dict(self.policy.state_dict())
     def learn(self,writer=None,time_step=None):
-        r=[0.0]*len(self.rewards); r_gamma={}
+        returns=[0.0]*len(self.rewards); running={}
         for idx in range(len(self.rewards)-1,-1,-1):
             eid=self.env_ids[idx]
-            if self.dones[idx]: r_gamma[eid]=0.0
-            r_gamma[eid]=self.rewards[idx]+(self.gamma*r_gamma.get(eid,0.0))
-            r[idx]=r_gamma[eid]
-        r=torch.tensor(r,dtype=torch.float32,device=self.device); r=(r-r.mean())/(r.std()+1e-7)
-        self.update(r,writer,time_step); self.clear()
-    def train_agent(self, env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY, ep_timeout_penalty=EP_TIMEOUT_PENALTY, writer=None,seed=43):
+            if self.dones[idx]: running[eid]=0.0
+            running[eid]=self.rewards[idx]+self.gamma*running.get(eid,0.0)
+            returns[idx]=running[eid]
+        returns=torch.tensor(returns,dtype=torch.float32,device=self.device); returns=(returns-returns.mean())/(returns.std()+1e-7)
+        self.update(returns,writer,time_step); self.clear()
+    def train_agent(self, env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY, ep_timeout_penalty=EP_TIMEOUT_PENALTY, writer=None):
         time_step,scores=0,[]
         for ep in range(1,episodes+1):
-            if seed is not None: state, _ = env.reset(seed=seed)
-            total=0; episode_length=ep_max_steps
+            state,_=env.reset(); total=0; episode_length=ep_max_steps
             for t in range(1,ep_max_steps+1):
-                action=self.act(state); state,reward,terminated,truncated,_=env.step(action)
+                action=self.act(state,env_id=0); state,reward,terminated,truncated,_=env.step(action)
                 reward+=ep_reward_penalty; done=terminated or truncated
                 if t==ep_max_steps and not done: reward+=ep_timeout_penalty; done=True
                 self.rewards.append(reward); self.dones.append(done); time_step+=1; total+=reward
@@ -110,48 +101,13 @@ class PPOAgent:
             if avg>=200: print(f"\nEnvironment solved in {ep:d} episodes!\tAverage Score: {avg:.2f}",flush=True); break
         if self.rewards: self.learn(writer,time_step)
         return scores
-    def train_agent_parallel(self, make_env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY, ep_timeout_penalty=EP_TIMEOUT_PENALTY, parallel_envs=PARALLEL_ENVS, rollout_workers=ROLLOUT_WORKERS, writer=None, seed=43):
-        envs=[make_env() for _ in range(parallel_envs)]
-        executor=ThreadPoolExecutor(max_workers=max(1,rollout_workers)) if rollout_workers>1 else None
-        states=[env.reset(seed=seed)[0] for env in envs]
-        totals=[0.0]*parallel_envs; lengths=[0]*parallel_envs; scores=[]; time_step=0; completed=0
-        print(f"Collecting rollouts with parallel_envs={parallel_envs}, rollout_workers={rollout_workers}",flush=True)
-        try:
-            while completed<episodes:
-                actions=self.act_batch(states)
-                if executor: results=list(executor.map(lambda pair: pair[0].step(int(pair[1])), zip(envs,actions)))
-                else: results=[envs[i].step(int(actions[i])) for i in range(parallel_envs)]
-                for i,(next_state,reward,terminated,truncated,_) in enumerate(results):
-                    lengths[i]+=1; reward+=ep_reward_penalty; done=terminated or truncated
-                    if lengths[i]>=ep_max_steps and not done: reward+=ep_timeout_penalty; done=True
-                    self.rewards.append(reward); self.dones.append(done); totals[i]+=reward; time_step+=1
-                    if done:
-                        completed+=1; scores.append(totals[i]); avg=np.mean(scores[-100:])
-                        if writer:
-                            writer.add_scalar("Train/Episode_Return",totals[i],completed); writer.add_scalar("Train/Average_Return_100",avg,completed); writer.add_scalar("Train/Episode_Length",lengths[i],completed); writer.add_scalar("Train/Total_Timesteps",time_step,completed)
-                        print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}",end="",flush=True)
-                        if completed%100==0: print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}",flush=True)
-                        totals[i]=0.0; lengths[i]=0; states[i]=envs[i].reset()[0]
-                        if avg>=200 and completed>=100:
-                            print(f"\nEnvironment solved in {completed:d} episodes!\tAverage Score: {avg:.2f}",flush=True); completed=episodes; break
-                    else:
-                        states[i]=next_state
-                if len(self.rewards)>=self.update_timestep: self.learn(writer,time_step)
-        finally:
-            if executor: executor.shutdown(wait=True)
-            for env in envs: env.close()
-        if self.rewards: self.learn(writer,time_step)
-        return scores
     def save(self,p): self.policy.save_model(p)
     def load(self,p): self.policy.load_model(p,self.device); self.policy_old.load_state_dict(self.policy.state_dict())
 
 def train(args):
-    device=torch.device("cuda" if torch.cuda.is_available() else "cpu");
-    set_seed(args.seed)
+    device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     writer=SummaryWriter(args.log_dir)
     probe_env=gym.make("LunarLander-v2")
-    probe_env.reset(seed=args.seed)
-    probe_env.action_space.seed(args.seed)
     agent=PPOAgent(
         state_size=probe_env.observation_space.shape[0],
         action_size=probe_env.action_space.n,
@@ -164,33 +120,16 @@ def train(args):
         lr_critic=args.lr_critic,
     )
     probe_env.close()
-    env = gym.make("LunarLander-v2")
-    env.reset(seed=args.seed)
-    env.action_space.seed(args.seed)
-    if args.parallel_envs>0: ## CHANGING TO 0 as a TEST
-        scores=agent.train_agent_parallel(
-            make_env=lambda: gym.make("LunarLander-v2"),
-            episodes=args.episodes,
-            ep_max_steps=args.ep_max_steps,
-            ep_reward_penalty=args.ep_reward_penalty,
-            ep_timeout_penalty=args.ep_timeout_penalty,
-            parallel_envs=args.parallel_envs,
-            rollout_workers=args.rollout_workers,
-            writer=writer,
-            seed=args.seed
-        )
-    else:
-        env=gym.make("LunarLander-v2")
-        scores=agent.train_agent(
-            env=env,
-            episodes=args.episodes,
-            ep_max_steps=args.ep_max_steps,
-            ep_reward_penalty=args.ep_reward_penalty,
-            ep_timeout_penalty=args.ep_timeout_penalty,
-            writer=writer,
-            seed=args.seed
-        )
-        env.close()
+    env=gym.make("LunarLander-v2")
+    scores=agent.train_agent(
+        env=env,
+        episodes=args.episodes,
+        ep_max_steps=args.ep_max_steps,
+        ep_reward_penalty=args.ep_reward_penalty,
+        ep_timeout_penalty=args.ep_timeout_penalty,
+        writer=writer
+    )
+    env.close()
     agent.save(args.model); writer.close()
     plt.plot(scores); plt.xlabel("Episode"); plt.ylabel("Reward"); plt.title("PPO LunarLander Training Scores")
     os.makedirs(args.log_dir, exist_ok=True)
@@ -198,11 +137,10 @@ def train(args):
     plt.close()
 
 def render(episodes=5,model_path=MODEL_PATH):
-    print("render episodes =", episodes)
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env=gym.make("LunarLander-v2",render_mode="human"); agent=PPOAgent(env.observation_space.shape[0], env.action_space.n, device); agent.load(model_path); agent.policy.eval()
     for ep in range(episodes):
-        state,_=env.reset(seed=SEED); done=False; total=0
+        state,_=env.reset(); done=False; total=0
         while not done:
             s=torch.as_tensor(state,dtype=torch.float32,device=device)
             with torch.no_grad(): action=torch.argmax(agent.policy.actor(s)).item()
@@ -247,15 +185,12 @@ if __name__=="__main__":
     parser.add_argument("--ep-max-steps",type=int,default=EP_MAX_STEPS)
     parser.add_argument("--ep-reward-penalty",type=float,default=EP_REWARD_PENALTY)
     parser.add_argument("--ep-timeout-penalty",type=float,default=EP_TIMEOUT_PENALTY)
-    parser.add_argument("--parallel-envs",type=int,default=PARALLEL_ENVS)
-    parser.add_argument("--rollout-workers",type=int,default=ROLLOUT_WORKERS)
     parser.add_argument("--log-dir",default="runs/ppo_lunar_lander")
     parser.add_argument("--model",default=MODEL_PATH)
-    parser.add_argument("--seed",type=int,default=SEED)
     args=parser.parse_args()
     {
-    "train": lambda: train(args=args),
-    "render": lambda: render(model_path=args.model),
+    "train": lambda: train(args),
+    "render": lambda: render(args.episodes, args.model),
     "play": play,
     "export": lambda: export_pngs(args.log_dir),
     }[args.mode]()
