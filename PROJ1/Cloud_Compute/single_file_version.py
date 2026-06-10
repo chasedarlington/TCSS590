@@ -54,15 +54,46 @@ class PPOAgent:
         self.policy_old=ActorCriticAgent(state_size, action_size).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.optimizer=torch.optim.Adam([{"params":self.policy.actor.parameters(),"lr":lr_actor},{"params":self.policy.critic.parameters(),"lr":lr_critic}])
+    def update_obs_stats(self, obs):
+        obs = np.asarray(obs, dtype=np.float32)
+        if obs.ndim == 1:
+            obs = obs[None, :]  # [state_dim] -> [1, state_dim]
+
+        batch_mean = obs.mean(axis=0)
+        batch_var = obs.var(axis=0)
+        batch_count = obs.shape[0]
+
+        delta = batch_mean - self.obs_mean
+        total_count = self.obs_count + batch_count
+        new_mean = self.obs_mean + delta * batch_count / total_count
+
+        m_a = self.obs_var * self.obs_count
+        m_b = batch_var * batch_count
+        m_2 = m_a + m_b + np.square(delta) * self.obs_count * batch_count / total_count
+        new_var = m_2 / total_count
+
+        self.obs_mean = new_mean.astype(np.float32)
+        self.obs_var = new_var.astype(np.float32)
+        self.obs_count = total_count
+
+    def normalize_obs(self, obs):
+        obs = np.asarray(obs, dtype=np.float32)
+        norm_obs = (obs - self.obs_mean) / np.sqrt(self.obs_var + 1e-8)
+        return np.clip(norm_obs, -self.obs_clip, self.obs_clip).astype(np.float32)
     def clear(self):
         self.actions.clear(); self.states.clear(); self.logprobs.clear(); self.rewards.clear(); self.state_values.clear(); self.dones.clear(); self.env_ids.clear()
     def act(self,state,env_id=0):
+        self.update_obs_stats(state); norm_state = self.normalize_obs(state)
         with torch.no_grad():
             s=torch.as_tensor(state,device=self.device,dtype=torch.float32); a,lp,v=self.policy_old.act(s)
         self.states.append(s); self.actions.append(a); self.logprobs.append(lp); self.state_values.append(v); self.env_ids.append(env_id); return a.item()
     def act_batch(self,states):
+        states = np.asarray(states, dtype=np.float32)
+        self.update_obs_stats(states)
+        norm_states = self.normalize_obs(states)
         with torch.no_grad():
-            s=torch.as_tensor(np.asarray(states),device=self.device,dtype=torch.float32); a,lp,v=self.policy_old.act(s)
+            s = torch.as_tensor(norm_states, device=self.device, dtype=torch.float32)
+            a, lp, v = self.policy_old.act(s)
         for i in range(len(states)):
             self.states.append(s[i]); self.actions.append(a[i]); self.logprobs.append(lp[i]); self.state_values.append(v[i]); self.env_ids.append(i)
         return a.detach().cpu().numpy().astype(int)
@@ -79,22 +110,28 @@ class PPOAgent:
             actor_loss=-torch.min(r * adv, torch.clamp(r, 1 - self.ppo_clip, 1 + self.ppo_clip) * adv)
             critic_loss=F.smooth_l1_loss(v,returns)
             loss=actor_loss+VF_COEF*critic_loss-ENT_COEF*ent
-            self.optimizer.zero_grad(); loss.mean().backward(); self.optimizer.step()
+            self.optimizer.zero_grad(); loss.mean().backward();
+            grad_norm = None
+            if self.grad_clip is not None and self.grad_clip > 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.grad_clip)
+            self.optimizer.step()
             if writer and time_step: # add actor loss, critic loss, entropy tracking?
                 writer.add_scalar("Loss/Total",loss.mean().item(),time_step)
                 writer.add_scalar("Loss/Actor",actor_loss.mean().item(),time_step)
                 writer.add_scalar("Loss/Critic",critic_loss.item(),time_step)
                 writer.add_scalar("Policy/Entropy",ent.mean().item(),time_step)
+                if grad_norm is not None:
+                    writer.add_scalar("Grad/Global_Norm_Pre_Clip", float(grad_norm), time_step)
         self.policy_old.load_state_dict(self.policy.state_dict())
     def learn(self,writer=None,time_step=None):
-        r=[0.0]*len(self.rewards); r_gamma={}
+        returns=[0.0]*len(self.rewards); r_gamma={}
         for idx in range(len(self.rewards)-1,-1,-1):
             eid=self.env_ids[idx]
             if self.dones[idx]: r_gamma[eid]=0.0
             r_gamma[eid]=self.rewards[idx]+(self.disc_coef * r_gamma.get(eid, 0.0))
-            r[idx]=r_gamma[eid]
-        r=torch.tensor(r,dtype=torch.float32,device=self.device)
-        self.update(r,writer,time_step); self.clear()
+            returns[idx]=r_gamma[eid]
+        returns=torch.tensor(returns,dtype=torch.float32,device=self.device)
+        self.update(returns,writer,time_step); self.clear()
     def train_agent(self, env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY, ep_timeout_penalty=EP_TIMEOUT_PENALTY, writer=None,seed=43):
         time_step,scores=0,[]
         for ep in range(1,episodes+1):
@@ -109,7 +146,12 @@ class PPOAgent:
                 if done: episode_length=t; break
             scores.append(total); avg=np.mean(scores[-100:])
             if writer:
-                writer.add_scalar("Train/Episode_Return",total,ep); writer.add_scalar("Train/Average_Return_100",avg,ep); writer.add_scalar("Train/Episode_Length",episode_length,ep); writer.add_scalar("Train/Total_Timesteps",time_step,ep)
+                writer.add_scalar("Train/Episode_Return", total, ep)
+                writer.add_scalar("Train/Average_Return_100", avg, ep)
+                writer.add_scalar("Train/Episode_Length", episode_length, ep)
+                writer.add_scalar("Train/Total_Timesteps", time_step, ep)
+                writer.add_scalar("Obs/Mean_Abs", float(np.mean(np.abs(self.obs_mean))), ep)
+                writer.add_scalar("Obs/Var_Mean", float(np.mean(self.obs_var)), ep)
             print(f"\rEpisode {ep}\tAverage Score: {avg:.2f}",end="",flush=True)
             if ep%100==0: print(f"\rEpisode {ep}\tAverage Score: {avg:.2f}",flush=True)
             if avg>=200: print(f"\nEnvironment solved in {ep:d} episodes!\tAverage Score: {avg:.2f}",flush=True); break
@@ -133,8 +175,13 @@ class PPOAgent:
                     if done:
                         completed+=1; scores.append(totals[i]); avg=np.mean(scores[-100:])
                         if writer:
-                            writer.add_scalar("Train/Episode_Return",totals[i],completed); writer.add_scalar("Train/Average_Return_100",avg,completed); writer.add_scalar("Train/Episode_Length",lengths[i],completed); writer.add_scalar("Train/Total_Timesteps",time_step,completed)
-                        print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}",end="",flush=True)
+                            writer.add_scalar("Train/Episode_Return", total, ep)
+                            writer.add_scalar("Train/Average_Return_100", avg, ep)
+                            writer.add_scalar("Train/Episode_Length", episode_length, ep)
+                            writer.add_scalar("Train/Total_Timesteps", time_step, ep)
+                            writer.add_scalar("Obs/Mean_Abs", float(np.mean(np.abs(self.obs_mean))), ep)
+                            writer.add_scalar("Obs/Var_Mean", float(np.mean(self.obs_var)), ep)
+                        print(f"\rEpisode {ep}\tAverage Score: {avg:.2f}", end="", flush=True)
                         if completed%100==0: print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}",flush=True)
                         totals[i]=0.0; lengths[i]=0; states[i]=envs[i].reset()[0]
                         if avg>=200 and completed>=100:
@@ -147,8 +194,32 @@ class PPOAgent:
             for env in envs: env.close()
         if self.rewards: self.learn(writer,time_step)
         return scores
-    def save(self,p): self.policy.save_model(p)
-    def load(self,p): self.policy.load_model(p,self.device); self.policy_old.load_state_dict(self.policy.state_dict())
+    def save(self, p):
+        torch.save(
+            {
+                "Actor_state_dict": self.policy.actor.state_dict(),
+                "Critic_state_dict": self.policy.critic.state_dict(),
+                "obs_mean": self.obs_mean,
+                "obs_var": self.obs_var,
+                "obs_count": self.obs_count,
+                "obs_clip": self.obs_clip,
+                "grad_clip": self.grad_clip,
+            },
+            p,
+        )
+    def load(self, p):
+        c = torch.load(p, map_location=self.device)
+        self.policy.actor.load_state_dict(c["Actor_state_dict"])
+        self.policy.critic.load_state_dict(c["Critic_state_dict"])
+        self.policy_old.load_state_dict(self.policy.state_dict())
+
+        if "obs_mean" in c:
+            self.obs_mean = np.asarray(c["obs_mean"], dtype=np.float32)
+            self.obs_var = np.asarray(c["obs_var"], dtype=np.float32)
+            self.obs_count = c["obs_count"]
+            self.obs_clip = c.get("obs_clip", self.obs_clip)
+        if "grad_clip" in c:
+            self.grad_clip = c["grad_clip"]
 
 def train(args):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu");
@@ -164,6 +235,7 @@ def train(args):
         timestep=args.timestep,
         epochs=args.epochs,
         ppo_clip=args.ppo_clip,
+        obs_clip=args.obs_clip,
         disc_coef=args.disc_coef,
         lr_actor=args.lr_actor,
         lr_critic=args.lr_critic,
@@ -202,14 +274,15 @@ def train(args):
     plt.savefig(os.path.join(args.log_dir, "training_scores.png"), dpi=200)
     plt.close()
 
-def render(episodes=5,model_path=MODEL_PATH):
+def render(episodes=5, model_path=MODEL_PATH, obs_clip=OBS_CLIP, grad_clip=GRAD_CLIP):
     print("render episodes =", episodes)
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env=gym.make("LunarLander-v2",render_mode="human"); agent=PPOAgent(env.observation_space.shape[0], env.action_space.n, device); agent.load(model_path); agent.policy.eval()
+    env=gym.make("LunarLander-v2",render_mode="human"); agent = PPOAgent(env.observation_space.shape[0], env.action_space.n, device, obs_clip=obs_clip, grad_clip=grad_clip); agent.load(model_path); agent.policy.eval()
     for ep in range(episodes):
         state,_=env.reset(seed=SEED); done=False; total=0
         while not done:
-            s=torch.as_tensor(state,dtype=torch.float32,device=device)
+            norm_state = agent.normalize_obs(state)
+            s = torch.as_tensor(norm_state, dtype=torch.float32, device=device)
             with torch.no_grad(): action=torch.argmax(agent.policy.actor(s)).item()
             state,reward,terminated,truncated,_=env.step(action); done=terminated or truncated; total+=reward
         print(f"Episode {ep+1}: reward = {total:.2f}")
@@ -224,43 +297,52 @@ def play():
         ("a",): 1,  # left engine
         ("w",): 2,  # main engine
         ("d",): 3,  # right engine
-
         ("w", "a"): 2,  # W+A still maps to main engine
         ("w", "d"): 2,  # W+D still maps to main engine
     }
     play(env,keys_to_action=keys_to_action,noop=2,fps=60); env.close()
 
-def export_pngs(log_dir="runs/ppo_lunar_lander",out_dir="tensorboard_pngs"):
+def export_pngs(log_dir="runs/ppo_lunar_lander", out_dir="tensorboard_pngs"):
     from pathlib import Path
     from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
-    Path(out_dir).mkdir(exist_ok=True); ea=EventAccumulator(log_dir); ea.Reload()
-    for tag in ea.Tags().get("scalars",[]):
-        e=ea.Scalars(tag); x=[v.step for v in e]; y=[v.value for v in e]
-        plt.figure(); plt.plot(x,y); plt.xlabel("Step"); plt.ylabel(tag); plt.title(tag); plt.tight_layout()
-        plt.savefig(os.path.join(out_dir,tag.replace("/","_")+".png"),dpi=200); plt.close()
 
-if __name__=="__main__":
-    parser=argparse.ArgumentParser()
-    parser.add_argument("mode",choices=["train","render","play","export"],nargs="?",default="train")
-    parser.add_argument("--timestep",type=int,default=TIMESTEP)
-    parser.add_argument("--epochs",type=int,default=EPOCHS)
-    parser.add_argument("--ppo_clip", type=float, default=PPO_CLIP)
-    parser.add_argument("--disc_coef", type=float, default=DISC_COEF)
-    parser.add_argument("--lr-actor",type=float,default=LR_ACTOR)
-    parser.add_argument("--lr-critic",type=float,default=LR_CRITIC)
-    parser.add_argument("--episodes",type=int,default=EPISODES)
-    parser.add_argument("--ep-max-steps",type=int,default=EP_MAX_STEPS)
-    parser.add_argument("--ep-reward-penalty",type=float,default=EP_REWARD_PENALTY)
-    parser.add_argument("--ep-timeout-penalty",type=float,default=EP_TIMEOUT_PENALTY)
-    parser.add_argument("--parallel-envs",type=int,default=PARALLEL_ENVS)
-    parser.add_argument("--rollout-workers",type=int,default=ROLLOUT_WORKERS)
-    parser.add_argument("--log-dir",default="runs/ppo_lunar_lander")
-    parser.add_argument("--model",default=MODEL_PATH)
-    parser.add_argument("--seed",type=int,default=SEED)
-    args=parser.parse_args()
+    Path(out_dir).mkdir(exist_ok=True)
+    ea = EventAccumulator(log_dir)
+    ea.Reload()
+    for tag in ea.Tags().get("scalars", []):
+        e = ea.Scalars(tag)
+        x = [v.step for v in e]
+        y = [v.value for v in e]
+        plt.figure()
+        plt.plot(x, y)
+        plt.xlabel("Step")
+        plt.ylabel(tag)
+        plt.title(tag)
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, tag.replace("/", "_") + ".png"), dpi=200)
+        plt.close()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", choices=["train", "render", "play", "export"], nargs="?", default="train")
+    parser.add_argument("--timestep", type=int, default=TIMESTEP)
+    parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--epsilon", type=float, default=EPSILON)
+    parser.add_argument("--gamma", type=float, default=GAMMA)
+    parser.add_argument("--lr-actor", type=float, default=LR_ACTOR)
+    parser.add_argument("--lr-critic", type=float, default=LR_CRITIC)
+    parser.add_argument("--episodes", type=int, default=EPISODES)
+    parser.add_argument("--ep-max-steps", type=int, default=EP_MAX_STEPS)
+    parser.add_argument("--ep-reward-penalty", type=float, default=EP_REWARD_PENALTY)
+    parser.add_argument("--ep-timeout-penalty", type=float, default=EP_TIMEOUT_PENALTY)
+    parser.add_argument("--obs-clip", type=float, default=OBS_CLIP)
+    parser.add_argument("--grad-clip", type=float, default=GRAD_CLIP)
+    parser.add_argument("--log-dir", default="runs/ppo_lunar_lander")
+    parser.add_argument("--model", default=MODEL_PATH)
+    args = parser.parse_args()
     {
-    "train": lambda: train(args=args),
-    "render": lambda: render(model_path=args.model),
-    "play": play,
-    "export": lambda: export_pngs(args.log_dir),
+        "train": lambda: train(args),
+        "render": lambda: render(args.episodes, args.model, args.obs_clip, args.grad_clip),
+        "play": play,
+        "export": lambda: export_pngs(args.log_dir),
     }[args.mode]()
