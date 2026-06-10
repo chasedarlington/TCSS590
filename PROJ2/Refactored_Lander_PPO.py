@@ -23,14 +23,14 @@ from lunar_lander_ppo import train_one_seed
 # "episode length" : number of steps in one environment run (episode)
 
 ### GLOBAL VARIABLES
-## NUM_ENVIRONMENTS_PER_RUN - [number of] environments for each python execution
-## MAX_EPISODES_PER_RUN - max [number of] episodes for each python execution
-## MAX_STEPS_PER_EPISODE - "episode horizon" : max [number of] steps before one episode is  force-ended
-## NUM_STEPS_PER_ENVIRONMENT_PER_ROLLOUT
+## NUM_PARALLEL_ENVIRONMENTS - [number of] environments for each python execution
+## MAX_EPISODES_PER_SEED - max [number of] episodes for each python execution
+## MAX_STEPS_PER_EPISODE - "episode horizon" : max [number of] steps before one episode is force-ended
+## TOTAL_STEPS_PER_ROLLOUT: [number of] steps PPO collects before doing one policy update (across all parallel envs)
 ## MAX_STEPS_PER_TRAINING - "rollout batch size" : max [number of] environment steps collected before each training cycle
-## NUM_TRAININGS_PER_ROLLOUT - max [number of] collect/update iterations for each rollout
+## NUM_TRAINING_EPOCHS_PER_ROLLOUT - max [number of] collect/update iterations for each rollout
 ## ROLLOUTS_PER_RUN
-## NUM_WORKERS_PER_RUN - [number of] rollout workers for each python execution
+## NUM_ROLLOUT_WORKERS_PER_SEED - [number of] rollout workers for each python execution
 ## LEARNING_RATE_ACTOR -
 ## LEARNING_RATE_CRITIC -
 ## PPO_CLIP - proximal policy objective clipping, limiting new and old policy probability ratio difference to a fixed range
@@ -43,14 +43,27 @@ from lunar_lander_ppo import train_one_seed
 ## LEARNING_RATE_DECAY - discount rate for learning rates, decreasing with time (steps)
 ## SEEDS -
 ## RENDER_INTERVAL - how often we render one episode during python execution
-NUM_ENVIRONMENTS_PER_RUN = 4
-MAX_EPISODES_PER_RUN = 2000
+NUM_PARALLEL_ENVIRONMENTS = 4
+
+MAX_EPISODES_PER_SEED = 2000
+# e.g. 2000 total episodes across all parallel envs per seed
+
 MAX_STEPS_PER_EPISODE = 500
-#NUM_STEPS_PER_ENVIRONMENT_PER_ROLLOUT = # 2048 batch size // envs
-#MAX_STEPS_PER_TRAINING = NUM_ENVIRONMENTS_PER_RUN * NUM_STEPS_PER_ENVIRONMENT_PER_ROLLOUT
-NUM_TRAININGS_PER_ROLLOUT = 4
-#ROLLOUTS_PER_RUN = MAX_EPISODES_PER_RUN * MAX_STEPS_PER_EPISODE / MAX_STEPS_PER_TRAINING
-NUM_WORKERS_PER_RUN = 4
+STEPS_PER_ENV_PER_ROLLOUT = 256
+
+TOTAL_STEPS_PER_ROLLOUT = STEPS_PER_ENV_PER_ROLLOUT * NUM_PARALLEL_ENVIRONMENTS # how many environment transitions PPO collects before doing one policy update
+# e.g 1000 steps_per_env_per_rollout * 4 envs = 4000 total transitions before one PPO update
+
+NUM_MINIBATCHES = 8
+
+MAX_STEPS_PER_SEED = MAX_EPISODES_PER_SEED * MAX_STEPS_PER_EPISODE
+# e.g. 2000 episodes_per_seed * 500 max_steps_per_episode = 1MM max total transitions per seed, across all envs
+
+MAX_ROLLOUTS_PER_SEED = MAX_STEPS_PER_SEED / TOTAL_STEPS_PER_ROLLOUT
+# e.g. 1MM / 4k = 250 max rollouts per seed
+
+NUM_TRAINING_EPOCHS_PER_ROLLOUT = 4 # PPO optimization epochs per rollout batch.
+NUM_ROLLOUT_WORKERS_PER_SEED = 4
 LEARNING_RATE_ACTOR = 0.0003
 LEARNING_RATE_CRITIC = 0.001
 PPO_CLIP = 0.20
@@ -115,6 +128,9 @@ class PPOAgent:
         state_size,
         action_size,
         device,
+        timestep=STEPS_PER_ENV_PER_ROLLOUT,
+        minibatches=NUM_MINIBATCHES,
+        epochs=NUM_TRAINING_EPOCHS_PER_ROLLOUT,
         ppo_clip=PPO_CLIP,
         obs_clip=OBS_CLIP,
         grad_clip=GRAD_CLIP,
@@ -124,6 +140,9 @@ class PPOAgent:
         learning_rate_critic=LEARNING_RATE_CRITIC,
     ):
         self.device = device
+        self.minibatches = minibatches
+        self.epochs = epochs
+
         self.ppo_clip = ppo_clip
         self.obs_clip = obs_clip
         self.grad_clip = grad_clip
@@ -309,11 +328,7 @@ class PPOAgent:
 
     ###
     def train_agent(
-        self,
-        make_env,
-        writer=None,
-        seed=None,
-        args
+        self, make_env, writer=None, seed=None, args
     ):
         envs = [make_env() for _ in range(args.envs)]
         executor = ThreadPoolExecutor(max_workers=max(1, args.wks)) if args.wks > 1 else None
@@ -420,13 +435,13 @@ def make_agent(args, device, env):
         env.action_space.n,
         device,
         timestep=args.timestep,
+        minibatches=args.num_minibatches,
         epochs=args.epochs,
         ppo_clip=args.ppo_clip,
         obs_clip=args.obs_clip,
         grad_clip=args.grad_clip,
-        minibatches=args.minibatches,
-        rewards_decay=args.rewards_decay,
         gae_coef=args.gae_coef,
+        rewards_decay=args.rewards_decay,
         learning_rate_actor=args.learning_rate_actor,
         learning_rate_critic=args.learning_rate_critic,
     )
@@ -469,11 +484,12 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["train", "render", "play", "export"], nargs="?", default="train")
-    parser.add_argument("--env", type=int, default=NUM_ENVIRONMENTS_PER_RUN)
-    parser.add_argument("--eps", type=int, default=MAX_EPISODES_PER_RUN)
+    parser.add_argument("--env", type=int, default=NUM_PARALLEL_ENVIRONMENTS)
+    parser.add_argument("--eps", type=int, default=MAX_EPISODES_PER_SEED)
     parser.add_argument("--stp", type=int, default=MAX_STEPS_PER_EPISODE)
-    parser.add_argument("--cyc", type=int, default=NUM_TRAININGS_PER_ROLLOUT)
-    parser.add_argument("--wks", type=int, default=NUM_WORKERS_PER_RUN)
+    parser.add_argument("--bch", type=int, default=NUM_MINIBATCHES)
+    parser.add_argument("--epo", type=int, default=NUM_TRAINING_EPOCHS_PER_ROLLOUT)
+    parser.add_argument("--wks", type=int, default=NUM_ROLLOUT_WORKERS_PER_SEED)
     parser.add_argument("--lra", type=float, default=LEARNING_RATE_ACTOR)
     parser.add_argument("--lrc", type=float, default=LEARNING_RATE_CRITIC)
     parser.add_argument("--ppo", type=float, default=PPO_CLIP)
