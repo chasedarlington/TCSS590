@@ -164,7 +164,7 @@ def run():
     print(f"Rollout workers: {rollout_workers}", file=log_file, flush=True)
 
     process = subprocess.Popen([
-        "python", "-u", "single_file_version.py", "train",
+        "python", "-u", "lunar_lander_ppo.py", "train",
         "--timestep", timestep,
         "--epochs", epochs,
         "--ppo_clip", epsilon,
@@ -198,7 +198,7 @@ def play():
         run_id = datetime.now().strftime("play_%Y%m%d_%H%M%S")
         play_log_file_path = open_log(run_id, "pygame")
         log_file = open(play_log_file_path, "w", buffering=1)
-        play_process = subprocess.Popen(["python", "-u", "single_file_version.py", "play"], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True)
+        play_process = subprocess.Popen(["python", "-u", "lunar_lander_ppo.py", "play"], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True)
     return redirect("/")
 
 ## Status endpoint for AJAX polling
@@ -367,7 +367,7 @@ def render_page():
 def render_frames(model_path, episodes):
     import gymnasium as gym
     import torch
-    from single_file_version import PPOAgent
+    from lunar_lander_ppo import PPOAgent
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = gym.make("LunarLander-v2", render_mode="rgb_array")
@@ -402,7 +402,7 @@ def render_stream():
     return Response(render_frames(model, episodes), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 ### Export TensorBoard PNGs
-## Route to handle exporting TensorBoard logs to PNG images. It runs a subprocess that calls the export function in the single_file_version.py script, which should contain the logic to read TensorBoard logs and save visualizations as PNG files. After exporting, it redirects the user to the /exports page to view the generated images.
+## Route to handle exporting TensorBoard logs to PNG images. It runs a subprocess that calls the export function in the lunar_lander_ppo.py script, which should contain the logic to read TensorBoard logs and save visualizations as PNG files. After exporting, it redirects the user to the /exports page to view the generated images.
 @app.route("/export", methods=["POST"])
 def export():
     global log_file_path
@@ -410,7 +410,7 @@ def export():
     run_id = datetime.now().strftime("export_%Y%m%d_%H%M%S")
     log_file_path = open_log(run_id, "export")
     with open(log_file_path, "w", buffering=1) as log_file:
-        subprocess.run(["python", "-u", "single_file_version.py", "export", "--log-dir", log_dir], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True, check=False)
+        subprocess.run(["python", "-u", "lunar_lander_ppo.py", "export", "--log-dir", log_dir], cwd=BASE_DIR, stdout=log_file, stderr=subprocess.STDOUT, text=True, check=False)
     return redirect("/exports")
 
 ### Exports page
