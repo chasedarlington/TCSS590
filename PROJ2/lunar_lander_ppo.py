@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 
 TIMESTEP, EPOCHS, MINIBATCHES, EPISODES, EP_MAX_STEPS = 1000, 10, 8, 2000, 500
 LR_ACTOR, LR_CRITIC, LR_DECAY = 0.0003, 0.001, True
-PPO_CLIP, OBS_CLIP, GRAD_CLIP, VF_COEF, ENT_COEF, DISC_COEF = 0.20, 10.0, 0.50, 0.50, 0.01, 0.99
+PPO_CLIP, OBS_CLIP, GRAD_CLIP, VF_COEF, ENT_COEF, DISC_COEF, GAE_COEF = 0.20, 10.0, 0.50, 0.50, 0.01, 0.99, 0.95
 # TO COMPLETELY NEGATE: 1e9,1e9,0,1,0,1 #
 EP_REWARD_PENALTY, EP_TIMEOUT_PENALTY = -0.1, -10.0
 PARALLEL_ENVS, ROLLOUT_WORKERS,  = 4, 4
@@ -32,6 +32,7 @@ def print_hyperparameters(args=None, agent=None):
         print(f"  obs_clip: {agent.obs_clip}", flush=True)
         print(f"  grad_clip: {agent.grad_clip}", flush=True)
         print(f"  disc_coef: {agent.disc_coef}", flush=True)
+        print(f"  gae_ceof: {agent.gae_coef}", flush=True)
 
 def set_seed(seed):
     np.random.seed(seed); torch.manual_seed(seed)
@@ -59,12 +60,12 @@ class PPOAgent:
     def __init__(
             self, state_size, action_size, device, timestep=TIMESTEP, epochs=EPOCHS, ppo_clip=PPO_CLIP,
             obs_clip=OBS_CLIP,
-            grad_clip=GRAD_CLIP, minibatches=MINIBATCHES, disc_coef=DISC_COEF, lr_actor=LR_ACTOR, lr_critic=LR_CRITIC
+            grad_clip=GRAD_CLIP, minibatches=MINIBATCHES, disc_coef=DISC_COEF, gae_coef=GAE_COEF, lr_actor=LR_ACTOR, lr_critic=LR_CRITIC
     ):
-        self.update_timestep, self.epochs, self.ppo_clip, self.disc_coef = timestep, epochs, ppo_clip, disc_coef
+        self.update_timestep, self.epochs, self.ppo_clip, self.disc_coef, self.gae_coef = timestep, epochs, ppo_clip, disc_coef, gae_coef
         self.lr_actor,self.lr_critic, self.minibatches = lr_actor,lr_critic,max(1, minibatches)
         self.device, self.state_dim, self.action_dim, self.grad_clip = device, state_size, action_size, grad_clip
-        self.actions, self.states, self.logprobs, self.rewards, self.state_values, self.dones, self.env_ids = [], [], [], [], [], [], []
+        self.actions, self.states, self.logprobs, self.rewards, self.state_values, self.next_state_values, self.dones, self.env_ids = [], [], [], [], [], [], []
         self.obs_mean, self.obs_var, self.obs_count, self.obs_clip = np.zeros(state_size, np.float32), np.ones(state_size, np.float32), 1e-4, obs_clip
         self.policy = ActorCriticAgent(state_size, action_size).to(device)
         self.policy_old = ActorCriticAgent(state_size, action_size).to(device); self.policy_old.load_state_dict(self.policy.state_dict())
@@ -85,8 +86,14 @@ class PPOAgent:
         obs = np.asarray(obs, dtype=np.float32)
         return np.clip((obs - self.obs_mean) / np.sqrt(self.obs_var + 1e-8), -self.obs_clip, self.obs_clip).astype(np.float32)
 
+    def value_of_states(self, states):
+        norm_states = self.normalize_obs(states)
+        s = torch.as_tensor(norm_states, dtype=torch.float32, device=self.device)
+        with torch.no_grad():
+            return self.policy_old.critic(s).reshape(-1).detach()
+
     def clear(self):
-        self.actions.clear(); self.states.clear(); self.logprobs.clear(); self.rewards.clear(); self.state_values.clear(); self.dones.clear(); self.env_ids.clear()
+        self.actions.clear(); self.states.clear(); self.logprobs.clear(); self.rewards.clear(); self.state_values.clear(); self.next_state_values.clear(); self.dones.clear(); self.env_ids.clear()
 
     def act(self, state, env_id=0):
         self.update_obs_stats(state); norm_state = self.normalize_obs(state)
@@ -113,7 +120,7 @@ class PPOAgent:
             writer.add_scalar("LR/Actor", actor_lr, step)
             writer.add_scalar("LR/Critic", critic_lr, step)
 
-    def update(self, returns, writer=None, time_step=None):
+    def update(self, returns, advantages, writer=None, time_step=None):
         s = torch.stack(self.states).detach().to(self.device)
         a = torch.stack(self.actions).detach().to(self.device).reshape(-1)
         old_lp = torch.stack(self.logprobs).detach().to(self.device).reshape(-1)
@@ -121,7 +128,7 @@ class PPOAgent:
         returns = returns.detach().to(self.device).reshape(-1)
         assert returns.shape == old_v.shape, f"returns {returns.shape}, old_v {old_v.shape}"
 
-        adv = returns - old_v
+        adv = advantages.detach().to(self.device).reshape(-1)
         adv = (adv - adv.mean()) / (adv.std() + 1e-7)
 
         batch_size = s.shape[0]
@@ -160,13 +167,27 @@ class PPOAgent:
         self.policy_old.load_state_dict(self.policy.state_dict())
 
     def learn(self, writer=None, time_step=None):
-        returns, r_gamma = [0.0] * len(self.rewards), {}
-        for idx in range(len(self.rewards) - 1, -1, -1):
+        rewards = torch.tensor(self.rewards, dtype=torch.float32, device=self.device)
+        values = torch.stack(self.state_values).detach().reshape(-1).to(self.device)
+        next_values = torch.stack(self.next_state_values).detach().reshape(-1).to(self.device)
+        dones = torch.tensor(self.dones, dtype=torch.float32, device=self.device)
+
+        advantages = torch.zeros_like(rewards)
+        gae_by_env = {}
+
+        for idx in range(len(rewards) - 1, -1, -1):
             eid = self.env_ids[idx]
-            if self.dones[idx]: r_gamma[eid] = 0.0
-            r_gamma[eid] = self.rewards[idx] + self.disc_coef * r_gamma.get(eid, 0.0)
-            returns[idx] = r_gamma[eid]
-        self.update(torch.tensor(returns, dtype=torch.float32, device=self.device), writer, time_step); self.clear()
+            if self.dones[idx]:
+                gae_by_env[eid] = 0.0
+
+            mask = 1.0 - dones[idx]
+            delta = rewards[idx] + self.disc_coef * next_values[idx] * mask - values[idx]
+            gae_by_env[eid] = delta + self.disc_coef * self.gae_lambda * mask * gae_by_env.get(eid, 0.0)
+            advantages[idx] = gae_by_env[eid]
+
+        returns = advantages + values
+        self.update(returns, advantages, writer, time_step)
+        self.clear()
 
     def train_agent(
             self, env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY,
@@ -178,11 +199,14 @@ class PPOAgent:
             state, _ = env.reset(seed=seed + ep - 1 if seed is not None else None)
             total, episode_length = 0, ep_max_steps
             for t in range(1, ep_max_steps + 1):
-                action = self.act(state); state, reward, terminated, truncated, _ = env.step(action)
+                action = self.act(state); next_state, reward, terminated, truncated, _ = env.step(action)
                 reward += ep_reward_penalty; done = terminated or truncated
+
                 if t == ep_max_steps and not done: reward += ep_timeout_penalty; done = True
-                self.rewards.append(reward); self.dones.append(done); time_step += 1; total += reward
+                next_value = torch.tensor(0.0,device=self.device) if done else self.value_of_states(next_state)
+                self.rewards.append(reward); self.next_state_values.append(next_value); self.dones.append(done); time_step += 1; total += reward
                 if len(self.rewards) >= self.update_timestep: self.learn(writer, time_step)
+                state = next_state
                 if done: episode_length = t; break
             scores.append(total); avg = np.mean(scores[-100:])
             if writer:
@@ -223,7 +247,8 @@ class PPOAgent:
                 for i, (next_state, reward, terminated, truncated, _) in enumerate(results):
                     lengths[i] += 1; reward += ep_reward_penalty; done = terminated or truncated
                     if lengths[i] >= ep_max_steps and not done: reward += ep_timeout_penalty; done = True
-                    self.rewards.append(reward); self.dones.append(done); totals[i] += reward; time_step += 1
+                    next_value = torch.tensor(0.0, device=self.device) if done else self.value_of_state(next_state)
+                    self.rewards.append(reward); self.next_state_values.append(next_value); self.dones.append(done); totals[i] += reward; time_step += 1
                     if done:
                         completed += 1; scores.append(totals[i]); avg = np.mean(scores[-100:])
                         if lr_decay: self.decay_learning_rate(1.0 - (completed - 1) / episodes, writer, completed)
@@ -289,7 +314,7 @@ class PPOAgent:
         self.obs_count, self.obs_clip, self.grad_clip = c.get("obs_count", self.obs_count), c.get("obs_clip", self.obs_clip), c.get("grad_clip", self.grad_clip)
 
 def make_agent(args, device, env):
-    return PPOAgent(env.observation_space.shape[0], env.action_space.n, device, args.timestep, args.epochs, args.ppo_clip, args.obs_clip, args.grad_clip, args.disc_coef, args.lr_actor, args.lr_critic)
+    return PPOAgent(env.observation_space.shape[0], env.action_space.n, device, args.timestep, args.epochs, args.ppo_clip, args.obs_clip, args.grad_clip, args.disc_coef, args.gae_coef, args.lr_actor, args.lr_critic)
 def train_one_seed(args, seed):
     set_seed(seed); device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log_dir = args.log_dir if args.num_seeds == 1 else os.path.join(args.log_dir, f"seed_{seed}")
@@ -358,6 +383,7 @@ if __name__ == "__main__":
     parser.add_argument("--obs-clip", type=float, default=OBS_CLIP)
     parser.add_argument("--grad-clip", type=float, default=GRAD_CLIP)
     parser.add_argument("--disc-coef", type=float, default=DISC_COEF)
+    parser.add_argument("--gae-coef", type=float, default=GAE_COEF)
     parser.add_argument("--lr-actor", type=float, default=LR_ACTOR)
     parser.add_argument("--lr-critic", type=float, default=LR_CRITIC)
     parser.add_argument("--episodes", type=int, default=EPISODES)
