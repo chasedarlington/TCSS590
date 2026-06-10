@@ -210,7 +210,6 @@ class PPOAgent:
                 writer.add_scalar("Train/Episode_Return", total, ep)
                 writer.add_scalar("Train/Average_Return_100", avg, ep)
                 writer.add_scalar("Train/Episode_Length", episode_length, ep)
-                writer.add_scalar("Train/Total_Timesteps", time_step, ep)
                 writer.add_scalar("Obs/Mean_Abs", float(np.mean(np.abs(self.obs_mean))), ep)
                 writer.add_scalar("Obs/Var_Mean", float(np.mean(self.obs_var)), ep)
             print(f"Episode {ep}\tAverage Score: {avg:.2f}", end="", flush=True)
@@ -223,7 +222,7 @@ class PPOAgent:
                 if writer:
                     writer.add_scalar("Eval/Rendered_Return", render_score, ep)
             if avg >= 200: print(f"Environment solved in {ep:d} episodes!\tAverage Score: {avg:.2f}", flush=True); break
-        if self.rewards: self.learn(writer, time_step)
+        if self.rewards: self.learn(writer, ep)
         return scores
 
     def train_agent_parallel(
