@@ -60,10 +60,10 @@ def main():
 
         action = env.action_space.sample()
 
-        # step (transition) through the environment with the action
+        # time_step (transition) through the environment with the action
         # receiving the next observation, reward and if the episode has terminated or truncated
 
-        observation, reward, terminated, truncated, info = env.step(action)
+        observation, reward, terminated, truncated, info = env.time_step(action)
 
 
         # If the episode has ended then we can reset to start args new episode
@@ -87,7 +87,7 @@ def render(model_path="ppo_lunar_lander.pt", episodes=5):
     agent.policy.eval()
 
     for episode in range(episodes):
-        state, info = env.reset()
+        state, info = env.reset(seed=43)
         done = False
         total_reward = 0
 
@@ -125,10 +125,10 @@ def render(model_path="ppo_lunar_lander.pt", episodes=5):
 if __name__ == "__main__":
 
     ## CREATE THE AGENT AND TRAIN THE MODEL !!
-    #main()
+    main()
 
     ## RENDER PREVIOUSLY TRAINED AGENT !! (USE .PT FILE)
-    render()
+    #render()
 
 
     """ 

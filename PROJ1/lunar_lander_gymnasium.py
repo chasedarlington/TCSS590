@@ -108,10 +108,10 @@ class LunarLander(gym.Env, EzPickle):
     that represent whether each leg is in contact with the ground or not.
 
     ## Rewards
-    After every step args reward is granted. The total reward of an episode is the
+    After every time_step args reward is granted. The total reward of an episode is the
     sum of the rewards for all the steps within that episode.
 
-    For each step, the reward:
+    For each time_step, the reward:
     - is increased/decreased the closer/further the lander is to the landing pad.
     - is increased/decreased the slower/faster the lander is moving.
     - is decreased the more the lander is tilted (angle not horizontal).
@@ -808,7 +808,7 @@ def heuristic(env, s):
             s[7] 1 if second leg has contact, else 0
 
     Returns:
-         args: The heuristic to be fed into the step function defined above to determine the next step and reward.
+         args: The heuristic to be fed into the time_step function defined above to determine the next time_step and reward.
     """
 
     angle_targ = s[0] * 0.5 + s[2] * 1.0  # angle should point towards center
@@ -859,7 +859,7 @@ def demo_heuristic_lander(env, seed=None, render=False):
 
         if steps % 20 == 0 or terminated or truncated:
             print("observations:", " ".join([f"{x:+0.2f}" for x in s]))
-            print(f"step {steps} total_reward {total_reward:+0.2f}")
+            print(f"time_step {steps} total_reward {total_reward:+0.2f}")
         steps += 1
         if terminated or truncated:
             break

@@ -18,7 +18,7 @@ from lunar_lander_models import AgentPPO
 ## HYPERPARAMETERS !!
 TIMESTEP = 1000 # update policy every n timesteps
 EPOCHS = 10 # update policy for n epochs
-EPSILON = 0.2 # clip log prob ratio to 1 +/- epsilon (PPO clip parameter)
+EPSILON = 0.2 # clip log prob ratio to 1 +/- ppo_clip (PPO clip parameter)
 GAMMA = 0.99 # discount factor
 LR_ACTOR = 0.0003 # learning rate of the actor
 LR_CRITIC = 0.001 # learning rate of the critic
@@ -117,7 +117,7 @@ class PPOAgent:
 
             ## note: smoothing with Huber loss for value function, and adding an entropy bonus to encourage exploration. The critic loss is weighted by 0.5 and the entropy bonus is weighted by 0.01. The negative sign in front of the surrogate loss is because we want to maximize it, but optimizers minimize the loss.
             
-            self.optimizer.zero_grad() # take gradient step
+            self.optimizer.zero_grad() # take gradient time_step
             loss.mean().backward() # back propagate the loss
             self.optimizer.step() # update the network parameters
 
@@ -151,7 +151,7 @@ class PPOAgent:
         scores = []
 
         for current_episode in range(1, num_episodes+1):
-            state = env.reset()[0]
+            state = env.reset(seed=43)[0]
             current_ep_reward = 0
 
             for t in range(1, max_steps+1): # max steps per episode

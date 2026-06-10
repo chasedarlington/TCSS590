@@ -9,12 +9,11 @@ from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from matplotlib import pyplot as plt
 
-TIMESTEP,EPOCHS,EPSILON,GAMMA=1000,10,0.2,0.99
+TIMESTEP,EPOCHS,EPISODES,EP_MAX_STEPS=500,1000,2000,500 ## TIMESTEP: env.step(a), EPOCHS: num of training iterations, EPISODES: num of complete env runs
 LR_ACTOR,LR_CRITIC=0.0003,0.001
-VALUE_LOSS_COEF,ENT_COEF=0.5,0.01
-EPISODES,EP_MAX_STEPS=2000,500
+PPO_CLIP,OBS_CLIP,GRAD_CLIP,VF_COEF,ENT_COEF,DISC_COEF=00.20,10.00,00.50,00.50,00.01,00.99
 EP_REWARD_PENALTY,EP_TIMEOUT_PENALTY=-0.00001,-10.0
-PARALLEL_ENVS,ROLLOUT_WORKERS=1,1
+PARALLEL_ENVS,ROLLOUT_WORKERS=1,3
 MODEL_PATH="ppo_lunar_lander.pt"
 SEED=43
 
@@ -46,10 +45,11 @@ class ActorCriticAgent(nn.Module):
         c=torch.load(p,map_location=device); self.actor.load_state_dict(c["Actor_state_dict"]); self.critic.load_state_dict(c["Critic_state_dict"])
 
 class PPOAgent:
-    def __init__(self,state_size,action_size,device,timestep=TIMESTEP,epochs=EPOCHS,epsilon=EPSILON,gamma=GAMMA,lr_actor=LR_ACTOR,lr_critic=LR_CRITIC):
-        self.update_timestep,self.epochs,self.epsilon,self.gamma=timestep,epochs,epsilon,gamma
+    def __init__(self,state_size,action_size,device,timestep=TIMESTEP,epochs=EPOCHS,ppo_clip=PPO_CLIP,obs_clip=OBS_CLIP,disc_coef=DISC_COEF,lr_actor=LR_ACTOR,lr_critic=LR_CRITIC):
+        self.update_timestep,self.epochs,self.ppo_clip,self.disc_coef=timestep,epochs,ppo_clip,disc_coef
         self.device,self.state_dim,self.action_dim=device,state_size,action_size
         self.actions,self.states,self.logprobs,self.rewards,self.state_values,self.dones,self.env_ids=[],[],[],[],[],[],[]
+        self.states_mean,self.states_var,self.states_count,self.obs_clip=np.zeros(state_size,dtype=np.float32),np.ones(state_size,dtype=np.float32),1e-4,obs_clip
         self.policy=ActorCriticAgent(state_size, action_size).to(device)
         self.policy_old=ActorCriticAgent(state_size, action_size).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
@@ -67,28 +67,33 @@ class PPOAgent:
             self.states.append(s[i]); self.actions.append(a[i]); self.logprobs.append(lp[i]); self.state_values.append(v[i]); self.env_ids.append(i)
         return a.detach().cpu().numpy().astype(int)
     def update(self, returns, writer=None, time_step=None):
-        s=torch.stack(self.states).squeeze(-1).detach().to(self.device)
-        a=torch.stack(self.actions).squeeze(-1).detach().to(self.device)
-        old_lp=torch.stack(self.logprobs).squeeze(-1).detach().to(self.device)
-        old_v=torch.stack(self.state_values).squeeze(-1).detach().to(self.device)
-        adv=returns.detach()-old_v.detach(); adv=(adv-adv.mean())/(adv.std()+1e-7)
+        s=torch.stack(self.states).detach().to(self.device)
+        a=torch.stack(self.actions).detach().to(self.device).view(-1)
+        old_lp=torch.stack(self.logprobs).detach().to(self.device).view(-1)
+        old_v=torch.stack(self.state_values).detach().to(self.device).view(-1)
+        returns=returns.detach().to(self.device).view(-1); assert returns.shape == old_v.shape, f"returns {returns.shape}, old_v {old_v.shape}"
+        adv=returns-old_v; adv=(adv-adv.mean())/(adv.std()+1e-7)
         for _ in range(self.epochs):
-            lp,v,ent=self.policy.evaluate(s,a); r=torch.exp(lp-old_lp.detach()); v=v.squeeze(-1)
-            actor_loss=-torch.min(r*adv,torch.clamp(r,1-self.epsilon,1+self.epsilon)*adv)
+            lp,v,ent=self.policy.evaluate(s,a); lp=lp.view(-1);v=v.view(-1);ent=ent.view(-1)
+            r=torch.exp(lp-old_lp)
+            actor_loss=-torch.min(r * adv, torch.clamp(r, 1 - self.ppo_clip, 1 + self.ppo_clip) * adv)
             critic_loss=F.smooth_l1_loss(v,returns)
-            loss= actor_loss + VALUE_LOSS_COEF * critic_loss - ENT_COEF * ent
+            loss=actor_loss+VF_COEF*critic_loss-ENT_COEF*ent
             self.optimizer.zero_grad(); loss.mean().backward(); self.optimizer.step()
             if writer and time_step: # add actor loss, critic loss, entropy tracking?
-                writer.add_scalar("Loss/Total", loss.mean().item(), time_step); writer.add_scalar("Loss/Actor", actor_loss.mean().item(), time_step); writer.add_scalar("Loss/Critic", critic_loss.item(), time_step); writer.add_scalar("Policy/Entropy", ent.mean().item(), time_step)
+                writer.add_scalar("Loss/Total",loss.mean().item(),time_step)
+                writer.add_scalar("Loss/Actor",actor_loss.mean().item(),time_step)
+                writer.add_scalar("Loss/Critic",critic_loss.item(),time_step)
+                writer.add_scalar("Policy/Entropy",ent.mean().item(),time_step)
         self.policy_old.load_state_dict(self.policy.state_dict())
     def learn(self,writer=None,time_step=None):
         r=[0.0]*len(self.rewards); r_gamma={}
         for idx in range(len(self.rewards)-1,-1,-1):
             eid=self.env_ids[idx]
             if self.dones[idx]: r_gamma[eid]=0.0
-            r_gamma[eid]=self.rewards[idx]+(self.gamma*r_gamma.get(eid,0.0))
+            r_gamma[eid]=self.rewards[idx]+(self.disc_coef * r_gamma.get(eid, 0.0))
             r[idx]=r_gamma[eid]
-        r=torch.tensor(r,dtype=torch.float32,device=self.device); r=(r-r.mean())/(r.std()+1e-7)
+        r=torch.tensor(r,dtype=torch.float32,device=self.device)
         self.update(r,writer,time_step); self.clear()
     def train_agent(self, env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY, ep_timeout_penalty=EP_TIMEOUT_PENALTY, writer=None,seed=43):
         time_step,scores=0,[]
@@ -158,8 +163,8 @@ def train(args):
         device=device,
         timestep=args.timestep,
         epochs=args.epochs,
-        epsilon=args.epsilon,
-        gamma=args.gamma,
+        ppo_clip=args.ppo_clip,
+        disc_coef=args.disc_coef,
         lr_actor=args.lr_actor,
         lr_critic=args.lr_critic,
     )
@@ -239,8 +244,8 @@ if __name__=="__main__":
     parser.add_argument("mode",choices=["train","render","play","export"],nargs="?",default="train")
     parser.add_argument("--timestep",type=int,default=TIMESTEP)
     parser.add_argument("--epochs",type=int,default=EPOCHS)
-    parser.add_argument("--epsilon",type=float,default=EPSILON)
-    parser.add_argument("--gamma",type=float,default=GAMMA)
+    parser.add_argument("--ppo_clip", type=float, default=PPO_CLIP)
+    parser.add_argument("--disc_coef", type=float, default=DISC_COEF)
     parser.add_argument("--lr-actor",type=float,default=LR_ACTOR)
     parser.add_argument("--lr-critic",type=float,default=LR_CRITIC)
     parser.add_argument("--episodes",type=int,default=EPISODES)

@@ -83,8 +83,8 @@ def home():
             <input id="run_name" name="run_name" type="text" value="ppo_lunar_lander" style="width: 420px;"><br><br>
             {slider("timestep", "Update timestep", "2048", "256", "8192", "256")}
             {slider("epochs", "PPO epochs", "10", "1", "30", "1")}
-            {slider("epsilon", "PPO clip epsilon", "0.2", "0.05", "0.5", "0.01")}
-            {slider("gamma", "Discount gamma", "0.99", "0.90", "0.999", "0.001")}
+            {slider("ppo_clip", "PPO clip ppo_clip", "0.2", "0.05", "0.5", "0.01")}
+            {slider("disc_coef", "Discount disc_coef", "0.99", "0.90", "0.999", "0.001")}
             {slider("lr_actor", "Actor learning rate", "0.0003", "0.0001", "0.005", "0.0001")}
             {slider("lr_critic", "Critic learning rate", "0.001", "0.0001", "0.005", "0.0001")}
             {slider("episodes", "Training episodes", "2000", "100", "10000", "100")}
@@ -138,8 +138,8 @@ def run():
 
     timestep = request.form.get("timestep", "2048")
     epochs = request.form.get("epochs", "10")
-    epsilon = request.form.get("epsilon", "0.2")
-    gamma = request.form.get("gamma", "0.99")
+    epsilon = request.form.get("ppo_clip", "0.2")
+    gamma = request.form.get("disc_coef", "0.99")
     lr_actor = request.form.get("lr_actor", "0.0003")
     lr_critic = request.form.get("lr_critic", "0.001")
     episodes = request.form.get("episodes", "2000")
@@ -167,8 +167,8 @@ def run():
         "python", "-u", "single_file_version.py", "train",
         "--timestep", timestep,
         "--epochs", epochs,
-        "--epsilon", epsilon,
-        "--gamma", gamma,
+        "--ppo_clip", epsilon,
+        "--disc_coef", gamma,
         "--lr-actor", lr_actor,
         "--lr-critic", lr_critic,
         "--episodes", episodes,
