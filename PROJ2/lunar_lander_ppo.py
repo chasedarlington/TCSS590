@@ -11,10 +11,9 @@ from matplotlib import pyplot as plt
 
 TIMESTEP, EPOCHS, MINIBATCHES, EPISODES, EP_MAX_STEPS = 1000, 10, 8, 2000, 500
 LR_ACTOR, LR_CRITIC, LR_DECAY = 0.0003, 0.001, True
-PPO_CLIP, OBS_CLIP, GRAD_CLIP, VF_COEF, ENT_COEF, DISC_COEF, GAE_COEF = 0.20, 10.0, 0.50, 0.50, 0.01, 0.99, 0.95
-# TO COMPLETELY NEGATE: 1e9,1e9,0,1,0,1 #
-EP_REWARD_PENALTY, EP_TIMEOUT_PENALTY = -0.1, -10.0
-PARALLEL_ENVS, ROLLOUT_WORKERS,  = 4, 4
+PPO_CLIP, OBS_CLIP, GRAD_CLIP, VF_COEF, ENT_COEF, DISC_COEF, GAE_COEF = 0.20, 10.0, 0.50, 0.50, 0.01, 0.99, 0.95 # TO COMPLETELY DISABLE: 1e9,1e9,0,1,0,1,1 #
+EP_REWARD_PENALTY, EP_TIMEOUT_PENALTY = 0,0 #-0.01, -10.0
+PARALLEL_ENVS, ROLLOUT_WORKERS = 4, 4
 MODEL_PATH = "ppo_lunar_lander.pt"
 SEED = 43
 RENDER_INTERVAL = 0
@@ -132,7 +131,6 @@ class PPOAgent:
         adv = (adv - adv.mean()) / (adv.std() + 1e-7)
 
         batch_size = s.shape[0]
-        minibatch_size = max(1, batch_size // self.minibatches)
 
         for _ in range(self.epochs):
             indices = torch.randperm(batch_size, device=self.device)
@@ -192,19 +190,19 @@ class PPOAgent:
             self, env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY,
             ep_timeout_penalty=EP_TIMEOUT_PENALTY, writer=None, seed=SEED, lr_decay=LR_DECAY, render_interval=RENDER_INTERVAL
     ):
-        time_step, scores = 0, []
+        scores = []
         for ep in range(1, episodes + 1):
-            if lr_decay: self.decay_learning_rate(1.0 - (ep - 1) / episodes, writer, ep)
-            state, _ = env.reset(seed=seed + ep - 1 if seed is not None else None)
+            state, _ = env.reset(seed = (seed + ep - 1))
             total, episode_length = 0, ep_max_steps
             for t in range(1, ep_max_steps + 1):
                 action = self.act(state); next_state, reward, terminated, truncated, _ = env.step(action)
                 reward += ep_reward_penalty; done = terminated or truncated
-
                 if t == ep_max_steps and not done: reward += ep_timeout_penalty; done = True
                 next_value = torch.tensor(0.0,device=self.device) if done else self.value_of_states(next_state)
-                self.rewards.append(reward); self.next_state_values.append(next_value); self.dones.append(done); time_step += 1; total += reward
-                if len(self.rewards) >= self.update_timestep: self.learn(writer, time_step)
+                self.rewards.append(reward); self.next_state_values.append(next_value); self.dones.append(done); total += reward
+                if len(self.rewards) >= self.update_timestep:
+                    self.decay_learning_rate(1.0 - ep / episodes, writer, ep)
+                    self.learn(writer, ep)
                 state = next_state
                 if done: episode_length = t; break
             scores.append(total); avg = np.mean(scores[-100:])
@@ -215,16 +213,16 @@ class PPOAgent:
                 writer.add_scalar("Train/Total_Timesteps", time_step, ep)
                 writer.add_scalar("Obs/Mean_Abs", float(np.mean(np.abs(self.obs_mean))), ep)
                 writer.add_scalar("Obs/Var_Mean", float(np.mean(self.obs_var)), ep)
-            print(f"\rEpisode {ep}\tAverage Score: {avg:.2f}", end="", flush=True)
+            print(f"Episode {ep}\tAverage Score: {avg:.2f}", end="", flush=True)
             if ep % 100 == 0:
-                print(f"\rEpisode {ep}\tAverage Score: {avg:.2f}", flush=True)
+                print(f"Episode {ep}\tAverage Score: {avg:.2f}", flush=True)
 
             if render_interval and render_interval > 0 and ep % render_interval == 0:
                 render_score = self.render_eval_episode(seed + ep if seed is not None else SEED)
-                print(f"\nRendered eval episode at train episode {ep}: reward = {render_score:.2f}", flush=True)
+                print(f"Rendered eval episode at train episode {ep}: reward = {render_score:.2f}", flush=True)
                 if writer:
                     writer.add_scalar("Eval/Rendered_Return", render_score, ep)
-            if avg >= 200: print(f"\nEnvironment solved in {ep:d} episodes!\tAverage Score: {avg:.2f}", flush=True); break
+            if avg >= 200: print(f"Environment solved in {ep:d} episodes!\tAverage Score: {avg:.2f}", flush=True); break
         if self.rewards: self.learn(writer, time_step)
         return scores
 
@@ -249,7 +247,7 @@ class PPOAgent:
                     self.rewards.append(reward); self.next_state_values.append(next_value); self.dones.append(done); totals[i] += reward; time_step += 1
                     if done:
                         completed += 1; scores.append(totals[i]); avg = np.mean(scores[-100:])
-                        if lr_decay: self.decay_learning_rate(1.0 - (completed - 1) / episodes, writer, completed)
+                        self.decay_learning_rate(1.0 - (completed - 1) / episodes, writer, completed)
                         if writer:
                             writer.add_scalar("Train/Episode_Return", totals[i], completed)
                             writer.add_scalar("Train/Average_Return_100", avg, completed)
@@ -257,13 +255,13 @@ class PPOAgent:
                             writer.add_scalar("Train/Total_Timesteps", time_step, completed)
                             writer.add_scalar("Obs/Mean_Abs", float(np.mean(np.abs(self.obs_mean))), completed)
                             writer.add_scalar("Obs/Var_Mean", float(np.mean(self.obs_var)), completed)
-                        print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}", end="", flush=True)
+                        print(f"Episode {completed}\tAverage Score: {avg:.2f}", end="", flush=True)
                         if completed % 100 == 0:
-                            print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}", flush=True)
+                            print(f"Episode {completed}\tAverage Score: {avg:.2f}", flush=True)
 
                         if render_interval and render_interval > 0 and completed % render_interval == 0:
                             render_score = self.render_eval_episode(seed + completed if seed is not None else SEED)
-                            print(f"\nRendered eval episode at train episode {completed}: reward = {render_score:.2f}",
+                            print(f"Rendered eval episode at train episode {completed}: reward = {render_score:.2f}",
                                   flush=True)
                             if writer:
                                 writer.add_scalar("Eval/Rendered_Return", render_score, completed)
@@ -271,7 +269,7 @@ class PPOAgent:
                         totals[i], lengths[i] = 0.0, 0
                         states[i] = envs[i].reset(seed=seed + completed + i if seed is not None else None)[0]
                         if avg >= 200 and completed >= 100:
-                            print(f"\nEnvironment solved in {completed:d} episodes!\tAverage Score: {avg:.2f}", flush=True); completed = episodes; break
+                            print(f"Environment solved in {completed:d} episodes!\tAverage Score: {avg:.2f}", flush=True); completed = episodes; break
                     else: states[i] = next_state
                 if len(self.rewards) >= self.update_timestep: self.learn(writer, time_step)
         finally:
@@ -349,7 +347,7 @@ def train_one_seed(args, seed):
 def train(args):
     all_scores = []
     for seed in range(args.seed, args.seed + args.num_seeds):
-        print(f"\nTraining seed {seed}", flush=True); all_scores.append(train_one_seed(args, seed))
+        print(f"Training seed {seed}", flush=True); all_scores.append(train_one_seed(args, seed))
     return all_scores
 
 def render(episodes=5, model_path=MODEL_PATH, obs_clip=OBS_CLIP, grad_clip=GRAD_CLIP, seed=SEED):
