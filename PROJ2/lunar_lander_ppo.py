@@ -65,7 +65,7 @@ class PPOAgent:
         self.update_timestep, self.epochs, self.ppo_clip, self.disc_coef, self.gae_coef = timestep, epochs, ppo_clip, disc_coef, gae_coef
         self.lr_actor,self.lr_critic, self.minibatches = lr_actor,lr_critic,max(1, minibatches)
         self.device, self.state_dim, self.action_dim, self.grad_clip = device, state_size, action_size, grad_clip
-        self.actions, self.states, self.logprobs, self.rewards, self.state_values, self.next_state_values, self.dones, self.env_ids = [], [], [], [], [], [], []
+        self.actions, self.states, self.logprobs, self.rewards, self.state_values, self.next_state_values, self.dones, self.env_ids = [], [], [], [], [], [], [], []
         self.obs_mean, self.obs_var, self.obs_count, self.obs_clip = np.zeros(state_size, np.float32), np.ones(state_size, np.float32), 1e-4, obs_clip
         self.policy = ActorCriticAgent(state_size, action_size).to(device)
         self.policy_old = ActorCriticAgent(state_size, action_size).to(device); self.policy_old.load_state_dict(self.policy.state_dict())
@@ -136,8 +136,7 @@ class PPOAgent:
 
         for _ in range(self.epochs):
             indices = torch.randperm(batch_size, device=self.device)
-            for start in range(0, batch_size, minibatch_size):
-                mb_idx = indices[start:start + minibatch_size]
+            for mb_idx in torch.chunk(indices, self.minibatches):
                 mb_s, mb_a, mb_old_lp = s[mb_idx], a[mb_idx], old_lp[mb_idx]
                 mb_returns, mb_adv = returns[mb_idx], adv[mb_idx]
 
@@ -182,7 +181,7 @@ class PPOAgent:
 
             mask = 1.0 - dones[idx]
             delta = rewards[idx] + self.disc_coef * next_values[idx] * mask - values[idx]
-            gae_by_env[eid] = delta + self.disc_coef * self.gae_lambda * mask * gae_by_env.get(eid, 0.0)
+            gae_by_env[eid] = delta + self.disc_coef * self.gae_coef * mask * gae_by_env.get(eid, 0.0)
             advantages[idx] = gae_by_env[eid]
 
         returns = advantages + values
@@ -238,8 +237,7 @@ class PPOAgent:
         executor = ThreadPoolExecutor(max_workers=max(1, rollout_workers)) if rollout_workers > 1 else None
         states = [env.reset(seed=seed + i if seed is not None else None)[0] for i, env in enumerate(envs)]
         totals, lengths, scores, time_step, completed = [0.0] * parallel_envs, [0] * parallel_envs, [], 0, 0
-        print(f"Collecting rollouts with parallel_envs={parallel_envs}, rollout_workers={rollout_workers}", flush=True)
-        print(f"\n")
+        print(f"Collecting rollouts with parallel_envs={parallel_envs}, rollout_workers={rollout_workers}\n", flush=True)
         try:
             while completed < episodes:
                 actions = self.act_batch(states)
@@ -247,7 +245,7 @@ class PPOAgent:
                 for i, (next_state, reward, terminated, truncated, _) in enumerate(results):
                     lengths[i] += 1; reward += ep_reward_penalty; done = terminated or truncated
                     if lengths[i] >= ep_max_steps and not done: reward += ep_timeout_penalty; done = True
-                    next_value = torch.tensor(0.0, device=self.device) if done else self.value_of_state(next_state)
+                    next_value = torch.tensor(0.0, device=self.device) if done else self.value_of_states(next_state)
                     self.rewards.append(reward); self.next_state_values.append(next_value); self.dones.append(done); totals[i] += reward; time_step += 1
                     if done:
                         completed += 1; scores.append(totals[i]); avg = np.mean(scores[-100:])
@@ -314,7 +312,17 @@ class PPOAgent:
         self.obs_count, self.obs_clip, self.grad_clip = c.get("obs_count", self.obs_count), c.get("obs_clip", self.obs_clip), c.get("grad_clip", self.grad_clip)
 
 def make_agent(args, device, env):
-    return PPOAgent(env.observation_space.shape[0], env.action_space.n, device, args.timestep, args.epochs, args.ppo_clip, args.obs_clip, args.grad_clip, args.disc_coef, args.gae_coef, args.lr_actor, args.lr_critic)
+    return PPOAgent(env.observation_space.shape[0], env.action_space.n, device,
+        timestep=args.timestep,
+        epochs=args.epochs,
+        ppo_clip=args.ppo_clip,
+        obs_clip=args.obs_clip,
+        grad_clip=args.grad_clip,
+        minibatches=args.minibatches,
+        disc_coef=args.disc_coef,
+        gae_coef=args.gae_coef,
+        lr_actor=args.lr_actor,
+        lr_critic=args.lr_critic)
 def train_one_seed(args, seed):
     set_seed(seed); device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log_dir = args.log_dir if args.num_seeds == 1 else os.path.join(args.log_dir, f"seed_{seed}")
