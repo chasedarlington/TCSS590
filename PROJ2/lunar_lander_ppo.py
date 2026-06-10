@@ -9,13 +9,29 @@ from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from matplotlib import pyplot as plt
 
-TIMESTEP, EPOCHS, EPISODES, EP_MAX_STEPS = 2048, 4, 2000, 500
-LR_ACTOR, LR_CRITIC = 3e-4, 1e-3
+TIMESTEP, EPOCHS, MINIBATCHES, EPISODES, EP_MAX_STEPS = 1000, 10, 8, 2000, 500
+LR_ACTOR, LR_CRITIC, LR_DECAY = 0.0003, 0.001, True
 PPO_CLIP, OBS_CLIP, GRAD_CLIP, VF_COEF, ENT_COEF, DISC_COEF = 0.20, 10.0, 0.50, 0.50, 0.01, 0.99
-EP_REWARD_PENALTY, EP_TIMEOUT_PENALTY = -0.00001, -10.0
-PARALLEL_ENVS, ROLLOUT_WORKERS, MINIBATCHES = 1, 3, 8
+# TO COMPLETELY NEGATE: 1e9,1e9,0,1,0,1 #
+EP_REWARD_PENALTY, EP_TIMEOUT_PENALTY = -0.1, -10.0
+PARALLEL_ENVS, ROLLOUT_WORKERS,  = 4, 4
 MODEL_PATH = "ppo_lunar_lander.pt"
 SEED = 43
+RENDER_INTERVAL = 0
+
+def print_hyperparameters(args=None, agent=None):
+    print("\nHyperparameters:", flush=True)
+    if args:
+        for k, v in vars(args).items():
+            print(f"  {k}: {v}", flush=True)
+    if agent:
+        print(f"  update_timestep: {agent.update_timestep}", flush=True)
+        print(f"  epochs: {agent.epochs}", flush=True)
+        print(f"  minibatches: {agent.minibatches}", flush=True)
+        print(f"  ppo_clip: {agent.ppo_clip}", flush=True)
+        print(f"  obs_clip: {agent.obs_clip}", flush=True)
+        print(f"  grad_clip: {agent.grad_clip}", flush=True)
+        print(f"  disc_coef: {agent.disc_coef}", flush=True)
 
 def set_seed(seed):
     np.random.seed(seed); torch.manual_seed(seed)
@@ -46,7 +62,7 @@ class PPOAgent:
             grad_clip=GRAD_CLIP, minibatches=MINIBATCHES, disc_coef=DISC_COEF, lr_actor=LR_ACTOR, lr_critic=LR_CRITIC
     ):
         self.update_timestep, self.epochs, self.ppo_clip, self.disc_coef = timestep, epochs, ppo_clip, disc_coef
-        self.minibatches = max(1, minibatches)
+        self.lr_actor,self.lr_critic, self.minibatches = lr_actor,lr_critic,max(1, minibatches)
         self.device, self.state_dim, self.action_dim, self.grad_clip = device, state_size, action_size, grad_clip
         self.actions, self.states, self.logprobs, self.rewards, self.state_values, self.dones, self.env_ids = [], [], [], [], [], [], []
         self.obs_mean, self.obs_var, self.obs_count, self.obs_clip = np.zeros(state_size, np.float32), np.ones(state_size, np.float32), 1e-4, obs_clip
@@ -87,6 +103,16 @@ class PPOAgent:
             self.states.append(s[i]); self.actions.append(a[i]); self.logprobs.append(lp[i]); self.state_values.append(v[i]); self.env_ids.append(i)
         return a.detach().cpu().numpy().astype(int)
 
+    def decay_learning_rate(self, progress_remaining, writer=None, step=None):
+        progress_remaining = max(0.0, min(1.0, progress_remaining))
+        actor_lr = self.lr_actor * progress_remaining
+        critic_lr = self.lr_critic * progress_remaining
+        self.optimizer.param_groups[0]["lr"] = actor_lr
+        self.optimizer.param_groups[1]["lr"] = critic_lr
+        if writer and step is not None:
+            writer.add_scalar("LR/Actor", actor_lr, step)
+            writer.add_scalar("LR/Critic", critic_lr, step)
+
     def update(self, returns, writer=None, time_step=None):
         s = torch.stack(self.states).detach().to(self.device)
         a = torch.stack(self.actions).detach().to(self.device).reshape(-1)
@@ -94,23 +120,43 @@ class PPOAgent:
         old_v = torch.stack(self.state_values).detach().to(self.device).reshape(-1)
         returns = returns.detach().to(self.device).reshape(-1)
         assert returns.shape == old_v.shape, f"returns {returns.shape}, old_v {old_v.shape}"
-        adv = returns - old_v; adv = (adv - adv.mean()) / (adv.std() + 1e-7)
+
+        adv = returns - old_v
+        adv = (adv - adv.mean()) / (adv.std() + 1e-7)
+
+        batch_size = s.shape[0]
+        minibatch_size = max(1, batch_size // self.minibatches)
+
         for _ in range(self.epochs):
-            lp, v, ent = self.policy.evaluate(s, a)
-            lp, v, ent = lp.reshape(-1), v.reshape(-1), ent.reshape(-1)
-            r = torch.exp(lp - old_lp)
-            actor_loss = -torch.min(r * adv, torch.clamp(r, 1 - self.ppo_clip, 1 + self.ppo_clip) * adv)
-            critic_loss = F.smooth_l1_loss(v, returns)
-            loss = actor_loss + VF_COEF * critic_loss - ENT_COEF * ent
-            self.optimizer.zero_grad(); loss.mean().backward(); grad_norm = None
-            if self.grad_clip is not None and self.grad_clip > 0: grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.grad_clip)
-            self.optimizer.step()
-            if writer and time_step:
-                writer.add_scalar("Loss/Total", loss.mean().item(), time_step)
-                writer.add_scalar("Loss/Actor", actor_loss.mean().item(), time_step)
-                writer.add_scalar("Loss/Critic", critic_loss.item(), time_step)
-                writer.add_scalar("Policy/Entropy", ent.mean().item(), time_step)
-                if grad_norm is not None: writer.add_scalar("Grad/Global_Norm_Pre_Clip", float(grad_norm), time_step)
+            indices = torch.randperm(batch_size, device=self.device)
+            for start in range(0, batch_size, minibatch_size):
+                mb_idx = indices[start:start + minibatch_size]
+                mb_s, mb_a, mb_old_lp = s[mb_idx], a[mb_idx], old_lp[mb_idx]
+                mb_returns, mb_adv = returns[mb_idx], adv[mb_idx]
+
+                lp, v, ent = self.policy.evaluate(mb_s, mb_a)
+                lp, v, ent = lp.reshape(-1), v.reshape(-1), ent.reshape(-1)
+
+                r = torch.exp(lp - mb_old_lp)
+                actor_loss = -torch.min(r * mb_adv, torch.clamp(r, 1 - self.ppo_clip, 1 + self.ppo_clip) * mb_adv)
+                critic_loss = F.smooth_l1_loss(v, mb_returns)
+                loss = actor_loss + VF_COEF * critic_loss - ENT_COEF * ent
+
+                self.optimizer.zero_grad()
+                loss.mean().backward()
+                grad_norm = None
+                if self.grad_clip is not None and self.grad_clip > 0:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.grad_clip)
+                self.optimizer.step()
+
+                if writer and time_step:
+                    writer.add_scalar("Loss/Total", loss.mean().item(), time_step)
+                    writer.add_scalar("Loss/Actor", actor_loss.mean().item(), time_step)
+                    writer.add_scalar("Loss/Critic", critic_loss.item(), time_step)
+                    writer.add_scalar("Policy/Entropy", ent.mean().item(), time_step)
+                    if grad_norm is not None:
+                        writer.add_scalar("Grad/Global_Norm_Pre_Clip", float(grad_norm), time_step)
+
         self.policy_old.load_state_dict(self.policy.state_dict())
 
     def learn(self, writer=None, time_step=None):
@@ -122,9 +168,13 @@ class PPOAgent:
             returns[idx] = r_gamma[eid]
         self.update(torch.tensor(returns, dtype=torch.float32, device=self.device), writer, time_step); self.clear()
 
-    def train_agent(self, env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY, ep_timeout_penalty=EP_TIMEOUT_PENALTY, writer=None, seed=SEED):
+    def train_agent(
+            self, env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY,
+            ep_timeout_penalty=EP_TIMEOUT_PENALTY, writer=None, seed=SEED, lr_decay=LR_DECAY, render_interval=RENDER_INTERVAL
+    ):
         time_step, scores = 0, []
         for ep in range(1, episodes + 1):
+            if lr_decay: self.decay_learning_rate(1.0 - (ep - 1) / episodes, writer, ep)
             state, _ = env.reset(seed=seed + ep - 1 if seed is not None else None)
             total, episode_length = 0, ep_max_steps
             for t in range(1, ep_max_steps + 1):
@@ -143,20 +193,29 @@ class PPOAgent:
                 writer.add_scalar("Obs/Mean_Abs", float(np.mean(np.abs(self.obs_mean))), ep)
                 writer.add_scalar("Obs/Var_Mean", float(np.mean(self.obs_var)), ep)
             print(f"\rEpisode {ep}\tAverage Score: {avg:.2f}", end="", flush=True)
-            if ep % 100 == 0: print(f"\rEpisode {ep}\tAverage Score: {avg:.2f}", flush=True)
+            if ep % 100 == 0:
+                print(f"\rEpisode {ep}\tAverage Score: {avg:.2f}", flush=True)
+
+            if render_interval and render_interval > 0 and ep % render_interval == 0:
+                render_score = self.render_eval_episode(seed + ep if seed is not None else SEED)
+                print(f"\nRendered eval episode at train episode {ep}: reward = {render_score:.2f}", flush=True)
+                if writer:
+                    writer.add_scalar("Eval/Rendered_Return", render_score, ep)
             if avg >= 200: print(f"\nEnvironment solved in {ep:d} episodes!\tAverage Score: {avg:.2f}", flush=True); break
         if self.rewards: self.learn(writer, time_step)
         return scores
 
     def train_agent_parallel(
-        self, make_env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY, ep_timeout_penalty=EP_TIMEOUT_PENALTY,
-        parallel_envs=PARALLEL_ENVS, rollout_workers=ROLLOUT_WORKERS, writer=None, seed=SEED
-    ):
+                self, make_env, episodes=EPISODES, ep_max_steps=EP_MAX_STEPS, ep_reward_penalty=EP_REWARD_PENALTY,
+                ep_timeout_penalty=EP_TIMEOUT_PENALTY,
+                parallel_envs=PARALLEL_ENVS, rollout_workers=ROLLOUT_WORKERS, writer=None, seed=SEED, lr_decay=LR_DECAY, render_interval=RENDER_INTERVAL
+        ):
         envs = [make_env() for _ in range(parallel_envs)]
         executor = ThreadPoolExecutor(max_workers=max(1, rollout_workers)) if rollout_workers > 1 else None
         states = [env.reset(seed=seed + i if seed is not None else None)[0] for i, env in enumerate(envs)]
         totals, lengths, scores, time_step, completed = [0.0] * parallel_envs, [0] * parallel_envs, [], 0, 0
         print(f"Collecting rollouts with parallel_envs={parallel_envs}, rollout_workers={rollout_workers}", flush=True)
+        print(f"\n")
         try:
             while completed < episodes:
                 actions = self.act_batch(states)
@@ -167,6 +226,7 @@ class PPOAgent:
                     self.rewards.append(reward); self.dones.append(done); totals[i] += reward; time_step += 1
                     if done:
                         completed += 1; scores.append(totals[i]); avg = np.mean(scores[-100:])
+                        if lr_decay: self.decay_learning_rate(1.0 - (completed - 1) / episodes, writer, completed)
                         if writer:
                             writer.add_scalar("Train/Episode_Return", totals[i], completed)
                             writer.add_scalar("Train/Average_Return_100", avg, completed)
@@ -175,7 +235,16 @@ class PPOAgent:
                             writer.add_scalar("Obs/Mean_Abs", float(np.mean(np.abs(self.obs_mean))), completed)
                             writer.add_scalar("Obs/Var_Mean", float(np.mean(self.obs_var)), completed)
                         print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}", end="", flush=True)
-                        if completed % 100 == 0: print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}", flush=True)
+                        if completed % 100 == 0:
+                            print(f"\rEpisode {completed}\tAverage Score: {avg:.2f}", flush=True)
+
+                        if render_interval and render_interval > 0 and completed % render_interval == 0:
+                            render_score = self.render_eval_episode(seed + completed if seed is not None else SEED)
+                            print(f"\nRendered eval episode at train episode {completed}: reward = {render_score:.2f}",
+                                  flush=True)
+                            if writer:
+                                writer.add_scalar("Eval/Rendered_Return", render_score, completed)
+
                         totals[i], lengths[i] = 0.0, 0
                         states[i] = envs[i].reset(seed=seed + completed + i if seed is not None else None)[0]
                         if avg >= 200 and completed >= 100:
@@ -187,6 +256,25 @@ class PPOAgent:
             for env in envs: env.close()
         if self.rewards: self.learn(writer, time_step)
         return scores
+
+    def render_eval_episode(self, seed=SEED):
+        env = gym.make("LunarLander-v2", render_mode="human")
+        state, _ = env.reset(seed=seed)
+        done, total = False, 0.0
+        self.policy.eval()
+
+        while not done:
+            norm_state = self.normalize_obs(state)
+            s = torch.as_tensor(norm_state, dtype=torch.float32, device=self.device)
+            with torch.no_grad():
+                action = torch.argmax(self.policy.actor(s)).item()
+            state, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
+            total += reward
+
+        env.close()
+        self.policy.train()
+        return total
 
     def save(self, p):
         torch.save({"Actor_state_dict": self.policy.actor.state_dict(), "Critic_state_dict": self.policy.critic.state_dict(), "obs_mean": self.obs_mean,
@@ -201,20 +289,24 @@ class PPOAgent:
         self.obs_count, self.obs_clip, self.grad_clip = c.get("obs_count", self.obs_count), c.get("obs_clip", self.obs_clip), c.get("grad_clip", self.grad_clip)
 
 def make_agent(args, device, env):
-    return PPOAgent(env.observation_space.shape[0], env.action_space.n, device, args.timestep, args.epochs, args.ppo_clip, args.obs_clip, args.grad_clip,
-                    args.disc_coef, args.lr_actor, args.lr_critic)
-
+    return PPOAgent(env.observation_space.shape[0], env.action_space.n, device, args.timestep, args.epochs, args.ppo_clip, args.obs_clip, args.grad_clip, args.disc_coef, args.lr_actor, args.lr_critic)
 def train_one_seed(args, seed):
     set_seed(seed); device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log_dir = args.log_dir if args.num_seeds == 1 else os.path.join(args.log_dir, f"seed_{seed}")
     writer = SummaryWriter(log_dir); probe_env = gym.make("LunarLander-v2")
     probe_env.reset(seed=seed); probe_env.action_space.seed(seed); agent = make_agent(args, device, probe_env); probe_env.close()
-    if args.parallel_envs > 0:
-        scores = agent.train_agent_parallel(lambda: gym.make("LunarLander-v2"), args.episodes, args.ep_max_steps, args.ep_reward_penalty,
-                                            args.ep_timeout_penalty, args.parallel_envs, args.rollout_workers, writer, seed)
+    print_hyperparameters(args); print("\n")
+    if args.parallel_envs > 1:
+        scores = agent.train_agent_parallel(
+            lambda: gym.make("LunarLander-v2"), args.episodes, args.ep_max_steps, args.ep_reward_penalty,
+            args.ep_timeout_penalty, args.parallel_envs, args.rollout_workers, writer, seed, args.lr_decay, args.render_interval
+        )
     else:
         env = gym.make("LunarLander-v2"); env.reset(seed=seed); env.action_space.seed(seed)
-        scores = agent.train_agent(env, args.episodes, args.ep_max_steps, args.ep_reward_penalty, args.ep_timeout_penalty, writer, seed); env.close()
+        scores = agent.train_agent(
+            env, args.episodes, args.ep_max_steps, args.ep_reward_penalty,
+            args.ep_timeout_penalty, writer, seed, args.lr_decay, args.render_interval
+        ); env.close()
     model_path = args.model if args.num_seeds == 1 else f"{os.path.splitext(args.model)[0]}_seed_{seed}{os.path.splitext(args.model)[1]}"
     agent.save(model_path); writer.close(); os.makedirs(log_dir, exist_ok=True)
     plt.plot(scores); plt.xlabel("Episode"); plt.ylabel("Reward"); plt.title(f"PPO LunarLander Training Scores Seed {seed}")
@@ -261,6 +353,7 @@ if __name__ == "__main__":
     parser.add_argument("mode", choices=["train", "render", "play", "export"], nargs="?", default="train")
     parser.add_argument("--timestep", type=int, default=TIMESTEP)
     parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--minibatches", type=int, default=MINIBATCHES)
     parser.add_argument("--ppo-clip", type=float, default=PPO_CLIP)
     parser.add_argument("--obs-clip", type=float, default=OBS_CLIP)
     parser.add_argument("--grad-clip", type=float, default=GRAD_CLIP)
@@ -277,6 +370,8 @@ if __name__ == "__main__":
     parser.add_argument("--num-seeds", type=int, default=1)
     parser.add_argument("--log-dir", default="runs/ppo_lunar_lander")
     parser.add_argument("--model", default=MODEL_PATH)
+    parser.add_argument("--lr-decay", action=argparse.BooleanOptionalAction, default=LR_DECAY)
+    parser.add_argument("--render-interval", type=int, default=RENDER_INTERVAL)
     args = parser.parse_args()
     {"train": lambda: train(args), "render": lambda: render(args.episodes, args.model, args.obs_clip, args.grad_clip, args.seed),
      "play": play, "export": lambda: export_pngs(args.log_dir)}[args.mode]()
