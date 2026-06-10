@@ -49,7 +49,7 @@ class PPOAgent:
         self.update_timestep,self.epochs,self.ppo_clip,self.disc_coef=timestep,epochs,ppo_clip,disc_coef
         self.device,self.state_dim,self.action_dim=device,state_size,action_size
         self.actions,self.states,self.logprobs,self.rewards,self.state_values,self.dones,self.env_ids=[],[],[],[],[],[],[]
-        self.states_mean,self.states_var,self.states_count,self.obs_clip=np.zeros(state_size,dtype=np.float32),np.ones(state_size,dtype=np.float32),1e-4,obs_clip
+        self.obs_mean,self.obs_var,self.obs_count,self.obs_clip=np.zeros(state_size,dtype=np.float32),np.ones(state_size,dtype=np.float32),1e-4,obs_clip
         self.policy=ActorCriticAgent(state_size, action_size).to(device)
         self.policy_old=ActorCriticAgent(state_size, action_size).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
