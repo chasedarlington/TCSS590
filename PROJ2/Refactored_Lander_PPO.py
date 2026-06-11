@@ -54,12 +54,13 @@ STEPS_PER_ENV_PER_ROLLOUT = 256
 TOTAL_STEPS_PER_ROLLOUT = STEPS_PER_ENV_PER_ROLLOUT * NUM_PARALLEL_ENVIRONMENTS # how many environment transitions PPO collects before doing one policy update
 # e.g 1000 steps_per_env_per_rollout * 4 envs = 4000 total transitions before one PPO update
 
-NUM_MINIBATCHES = 8
+NUM_MINIBATCHES = 8 # split each rollout batch into x minibatches
+MINIBATCH_SIZE = TOTAL_STEPS_PER_ROLLOUT // NUM_MINIBATCHES
 
 MAX_STEPS_PER_SEED = MAX_EPISODES_PER_SEED * MAX_STEPS_PER_EPISODE
 # e.g. 2000 episodes_per_seed * 500 max_steps_per_episode = 1MM max total transitions per seed, across all envs
 
-MAX_ROLLOUTS_PER_SEED = MAX_STEPS_PER_SEED / TOTAL_STEPS_PER_ROLLOUT
+MAX_ROLLOUTS_PER_SEED = MAX_STEPS_PER_SEED // TOTAL_STEPS_PER_ROLLOUT
 # e.g. 1MM / 4k = 250 max rollouts per seed
 
 NUM_TRAINING_EPOCHS_PER_ROLLOUT = 4 # PPO optimization epochs per rollout batch.
@@ -128,7 +129,7 @@ class PPOAgent:
         state_size,
         action_size,
         device,
-        timestep=STEPS_PER_ENV_PER_ROLLOUT,
+        update_timestep=TOTAL_STEPS_PER_ROLLOUT,
         minibatches=NUM_MINIBATCHES,
         epochs=NUM_TRAINING_EPOCHS_PER_ROLLOUT,
         ppo_clip=PPO_CLIP,
@@ -140,9 +141,9 @@ class PPOAgent:
         learning_rate_critic=LEARNING_RATE_CRITIC,
     ):
         self.device = device
+        self.update_timestep = update_timestep
         self.minibatches = minibatches
         self.epochs = epochs
-
         self.ppo_clip = ppo_clip
         self.obs_clip = obs_clip
         self.grad_clip = grad_clip
@@ -434,7 +435,7 @@ def make_agent(args, device, env):
         env.observation_space.shape[0],
         env.action_space.n,
         device,
-        timestep=args.timestep,
+        update_timestep=args.update_timestep,
         minibatches=args.num_minibatches,
         epochs=args.epochs,
         ppo_clip=args.ppo_clip,
